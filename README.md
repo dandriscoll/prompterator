@@ -21,6 +21,8 @@ prompterator run --examples path/to/examples.txt --prompt "Initial prompt"
 ## Configuration
 
 The `.env` file stores all configuration, including LLM endpoints, file handling mode, and the examples backend module.
+Azure OpenAI endpoints are supported; provide the full deployment URL (including the `api-version` query)
+and the API key.
 
 `FILE_MODE` supports:
 

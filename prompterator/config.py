@@ -6,12 +6,10 @@ from typing import Dict, Optional
 
 ENV_TEMPLATE = """# Prompterator configuration
 #
-# LLM endpoints
+# LLM endpoints + keys
 EDITOR_LLM_ENDPOINT=
-OPERATOR_LLM_ENDPOINT=
-
-# Optional API keys
 EDITOR_LLM_API_KEY=
+OPERATOR_LLM_ENDPOINT=
 OPERATOR_LLM_API_KEY=
 
 # File mode: auto, git, plain
