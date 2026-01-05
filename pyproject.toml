@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prompterator"
+version = "0.1.0"
+description = "CLI tool for refining prompts with editor/operator LLMs"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+prompterator = "prompterator.cli:main"
