@@ -1,0 +1,54 @@
+"""Result models for evaluation results."""
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class EvalResult(BaseModel):
+    """Result of a single evaluation."""
+
+    eval_id: str = Field(description="Reference to the eval that was run")
+    passed: bool = Field(description="Whether the eval passed")
+    score: float = Field(description="Numeric score (0.0-1.0)")
+    details: str | None = Field(default=None, description="Additional details")
+
+
+class ResultSummary(BaseModel):
+    """Summary of all evaluation results."""
+
+    overall_score: float = Field(description="Average score across all evals")
+    verdict: Literal["PASS", "FAIL", "PARTIAL"] = Field(description="Overall verdict")
+    passed_count: int = Field(default=0, description="Number of passed evals")
+    failed_count: int = Field(default=0, description="Number of failed evals")
+
+
+class ResultFile(BaseModel):
+    """Complete results file structure."""
+
+    version: str = Field(default="1.0", description="File format version")
+    prompt_tested: str = Field(description="Path to the prompt that was tested")
+    results: list[EvalResult] = Field(default_factory=list, description="Individual eval results")
+    summary: ResultSummary = Field(description="Summary of results")
+
+    def to_yaml_dict(self) -> dict:
+        """Convert to dictionary suitable for YAML serialization."""
+        return {
+            "version": self.version,
+            "prompt_tested": self.prompt_tested,
+            "results": [
+                {
+                    "eval_id": r.eval_id,
+                    "passed": r.passed,
+                    "score": r.score,
+                    **({"details": r.details} if r.details else {}),
+                }
+                for r in self.results
+            ],
+            "summary": {
+                "overall_score": self.summary.overall_score,
+                "verdict": self.summary.verdict,
+                "passed_count": self.summary.passed_count,
+                "failed_count": self.summary.failed_count,
+            },
+        }

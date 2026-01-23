@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""ft - File naming tool for prompterator.
+
+Implements the naming contract defined in docs/NAMING_CONTRACT.md.
+"""
+
+import os
+import re
+import sys
+from pathlib import Path
+
+# File type definitions
+TYPES = {
+    "prompt.txt": ".prompt.txt",
+    "prompt.md": ".prompt.md",
+    "out.txt": ".out.txt",
+    "mb": ".mb",
+    "log": ".log",
+}
+
+PRIOR_TYPES = ["prompt.txt", "prompt.md"]
+SOURCE_TYPE = "out.txt"
+FEEDBACK_TYPE = "mb"
+
+# Filename pattern: [index][variation?][-name?][.extension]
+# index: zero-padded digits (e.g., 001, 0042)
+# variation: lowercase letters (a-z, za-zz, etc.)
+# name: optional descriptor with hyphen prefix
+FILENAME_PATTERN = re.compile(
+    r"^(?P<index>\d+)"
+    r"(?P<variation>[a-z]+)?"
+    r"(?:-(?P<name>[a-z0-9_-]+))?"
+    r"(?P<ext>\.[a-z.]+)$",
+    re.IGNORECASE,
+)
+
+
+def parse_filename(filename: str) -> dict | None:
+    """Parse a filename into its components."""
+    match = FILENAME_PATTERN.match(filename)
+    if not match:
+        return None
+    return {
+        "index": match.group("index"),
+        "variation": match.group("variation") or "",
+        "name": match.group("name") or "",
+        "ext": match.group("ext"),
+    }
+
+
+def get_type_from_ext(ext: str) -> str | None:
+    """Get type name from extension."""
+    for type_name, type_ext in TYPES.items():
+        if ext.lower() == type_ext.lower():
+            return type_name
+    return None
+
+
+def get_ext_from_type(type_name: str) -> str | None:
+    """Get extension from type name."""
+    return TYPES.get(type_name)
+
+
+def increment_variation(variation: str) -> str:
+    """Increment a variation string: '' -> 'a', 'a' -> 'b', ..., 'z' -> 'za'."""
+    if not variation:
+        return "a"
+
+    # Convert to list for manipulation
+    chars = list(variation)
+
+    # Increment from rightmost character
+    i = len(chars) - 1
+    while i >= 0:
+        if chars[i] == "z":
+            chars[i] = "a"
+            i -= 1
+        else:
+            chars[i] = chr(ord(chars[i]) + 1)
+            break
+    else:
+        # All characters were 'z', prepend 'z'
+        chars.insert(0, "z")
+
+    return "".join(chars)
+
+
+def build_filename(index: str, variation: str, name: str, ext: str) -> str:
+    """Build a filename from components."""
+    parts = [index]
+    if variation:
+        parts.append(variation)
+    if name:
+        parts.append(f"-{name}")
+    parts.append(ext)
+    return "".join(parts)
+
+
+def find_available_filename(directory: Path, index: str, variation: str, name: str, ext: str) -> str:
+    """Find an available filename by incrementing variation if needed."""
+    max_iterations = 1000  # Safety limit
+
+    for _ in range(max_iterations):
+        filename = build_filename(index, variation, name, ext)
+        if not (directory / filename).exists():
+            return filename
+        variation = increment_variation(variation)
+
+    raise RuntimeError("Could not find available filename after 1000 iterations")
+
+
+def cmd_config() -> None:
+    """Print tool configuration."""
+    print(f"prior-types: {', '.join(PRIOR_TYPES)}")
+    print(f"source-type: {SOURCE_TYPE}")
+    print(f"feedback-type: {FEEDBACK_TYPE}")
+
+
+def cmd_propose(path_str: str, target_type: str) -> None:
+    """Propose a new filename for the given path with the target type."""
+    path = Path(path_str)
+    directory = path.parent if path.parent != Path() else Path(".")
+    filename = path.name
+
+    # Parse the original filename
+    parsed = parse_filename(filename)
+    if not parsed:
+        print(f"Error: Cannot parse filename '{filename}'", file=sys.stderr)
+        sys.exit(1)
+
+    # Get the target extension
+    target_ext = get_ext_from_type(target_type)
+    if not target_ext:
+        print(f"Error: Unknown type '{target_type}'", file=sys.stderr)
+        sys.exit(1)
+
+    # Determine source type
+    source_type = get_type_from_ext(parsed["ext"])
+
+    # If same type, increment variation
+    variation = parsed["variation"]
+    if source_type == target_type:
+        variation = increment_variation(variation)
+
+    # Find available filename
+    new_filename = find_available_filename(
+        directory,
+        parsed["index"],
+        variation,
+        parsed["name"],
+        target_ext,
+    )
+
+    # Output with directory prefix
+    print(f"{directory}/{new_filename}")
+
+
+def cmd_ready(path_str: str) -> None:
+    """Check if a file is ready for transformation."""
+    path = Path(path_str)
+    filename = path.name
+
+    parsed = parse_filename(filename)
+    if not parsed:
+        print("false")
+        return
+
+    file_type = get_type_from_ext(parsed["ext"])
+    if file_type in PRIOR_TYPES:
+        print("true")
+    else:
+        print("false")
+
+
+def cmd_bundles(directory: str = ".") -> None:
+    """List all bundles in a directory."""
+    dir_path = Path(directory)
+    if not dir_path.is_dir():
+        print(f"Error: Not a directory: {directory}", file=sys.stderr)
+        sys.exit(1)
+
+    # Group files by index and name
+    groups: dict[tuple[str, str], dict[str, list[str]]] = {}
+
+    for file_path in dir_path.iterdir():
+        if not file_path.is_file():
+            continue
+
+        parsed = parse_filename(file_path.name)
+        if not parsed:
+            continue
+
+        key = (parsed["index"], parsed["name"])
+        file_type = get_type_from_ext(parsed["ext"])
+
+        if key not in groups:
+            groups[key] = {"priors": [], "sources": []}
+
+        if file_type in PRIOR_TYPES:
+            groups[key]["priors"].append(file_path.name)
+        elif file_type == SOURCE_TYPE:
+            groups[key]["sources"].append(file_path.name)
+
+    # Build output
+    bundles = []
+    for key, files in sorted(groups.items()):
+        priors = sorted(files["priors"])
+        sources = sorted(files["sources"])
+
+        if priors:
+            # Use first prior as the bundle identifier
+            prior = priors[0]
+            bundles.append((prior, sources))
+        elif sources:
+            # Orphan sources become their own bundles
+            for source in sources:
+                bundles.append((source, []))
+
+    # Output tab-separated
+    for prior, sources in bundles:
+        if sources:
+            print(f"{prior}\t{','.join(sources)}")
+        else:
+            print(prior)
+
+
+def main() -> None:
+    """Main entry point."""
+    if len(sys.argv) < 2:
+        print("Usage: ft <command> [args...]", file=sys.stderr)
+        print("Commands: config, propose, ready, bundles", file=sys.stderr)
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    if command == "config":
+        cmd_config()
+    elif command == "propose":
+        if len(sys.argv) != 4:
+            print("Usage: ft propose <path> <type>", file=sys.stderr)
+            sys.exit(1)
+        cmd_propose(sys.argv[2], sys.argv[3])
+    elif command == "ready":
+        if len(sys.argv) != 3:
+            print("Usage: ft ready <path>", file=sys.stderr)
+            sys.exit(1)
+        cmd_ready(sys.argv[2])
+    elif command == "bundles":
+        directory = sys.argv[2] if len(sys.argv) > 2 else "."
+        cmd_bundles(directory)
+    else:
+        print(f"Unknown command: {command}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

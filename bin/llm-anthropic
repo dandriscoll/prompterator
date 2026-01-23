@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""LLM runner for Anthropic Claude API.
+
+Reads prompt from stdin, outputs response to stdout.
+Requires ANTHROPIC_API_KEY environment variable.
+"""
+
+import argparse
+import os
+import sys
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Anthropic LLM runner")
+    parser.add_argument("--system", help="System prompt")
+    parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
+    parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum tokens to generate")
+    parser.add_argument("--model", default="claude-sonnet-4-20250514", help="Model to use")
+    args = parser.parse_args()
+
+    # Check for API key
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("Error: ANTHROPIC_API_KEY environment variable not set", file=sys.stderr)
+        sys.exit(1)
+
+    # Read prompt from stdin
+    prompt = sys.stdin.read().strip()
+    if not prompt:
+        print("Error: No prompt provided on stdin", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        import anthropic
+    except ImportError:
+        print("Error: anthropic package not installed", file=sys.stderr)
+        print("Install with: pip install anthropic", file=sys.stderr)
+        sys.exit(1)
+
+    # Create client and make request
+    client = anthropic.Anthropic(api_key=api_key)
+
+    messages = [{"role": "user", "content": prompt}]
+
+    kwargs = {
+        "model": args.model,
+        "max_tokens": args.max_tokens,
+        "messages": messages,
+    }
+
+    if args.system:
+        kwargs["system"] = args.system
+
+    if args.temperature is not None:
+        kwargs["temperature"] = args.temperature
+
+    try:
+        response = client.messages.create(**kwargs)
+        # Extract text from response
+        for block in response.content:
+            if hasattr(block, "text"):
+                print(block.text)
+    except anthropic.APIError as e:
+        print(f"API Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
