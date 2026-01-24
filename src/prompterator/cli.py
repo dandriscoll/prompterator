@@ -3,6 +3,7 @@
 import click
 
 from prompterator import __version__
+from prompterator.commands.collect import collect_cmd
 from prompterator.commands.evals import evals_cmd
 from prompterator.commands.feedback import feedback_cmd
 from prompterator.commands.improve import improve_cmd
@@ -26,6 +27,11 @@ def main() -> None:
     4. improve   - Generate improved prompts via LLM
     5. test      - Run evals against prompts
 
+    \b
+    Utilities:
+    - collect  - Gather mb files with their source and prior files
+    - status   - Show workflow state
+
     Run 'prompterator init' to create a configuration file.
     """
     pass
@@ -39,6 +45,7 @@ main.add_command(evals_cmd)
 main.add_command(improve_cmd)
 main.add_command(test_cmd)
 main.add_command(status_cmd)
+main.add_command(collect_cmd)
 
 
 if __name__ == "__main__":
