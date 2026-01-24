@@ -6,10 +6,14 @@ from pathlib import Path
 import click
 
 
-def get_source_file(mb_path: Path) -> Path | None:
-    """Extract source file reference from an mb file.
+def parse_mb_directives(mb_path: Path) -> tuple[str | None, str | None]:
+    """Parse @source and @prior directives from an mb file.
 
-    Looks for @source directive in the mb file.
+    Uses markback library when possible, falls back to manual parsing
+    for files without feedback lines.
+
+    Returns:
+        Tuple of (source_value, prior_value) - values may be None if not found.
     """
     try:
         import markback
@@ -20,37 +24,51 @@ def get_source_file(mb_path: Path) -> Path | None:
 
     result = markback.parse_file(mb_path)
 
-    for record in result.records:
-        if record.source:
-            source_path = mb_path.parent / record.source.value
-            return source_path
+    # If markback found records, use them
+    if result.records:
+        rec = result.records[0]
+        source_value = rec.source.value if rec.source else None
+        prior_value = rec.prior.value if rec.prior else None
+        return source_value, prior_value
+
+    # Fall back to manual parsing for files without feedback lines
+    content = mb_path.read_text()
+
+    source_value = None
+    prior_value = None
+
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith("@source "):
+            source_value = line[8:].strip()
+        elif line.startswith("@prior "):
+            prior_value = line[7:].strip()
+
+    return source_value, prior_value
+
+
+def get_source_file(mb_path: Path) -> Path | None:
+    """Extract source file reference from an mb file.
+
+    Looks for @source directive in the mb file.
+    """
+    source_value, _ = parse_mb_directives(mb_path)
+
+    if source_value:
+        return mb_path.parent / source_value
 
     return None
 
 
-def get_prior_file(mb_path: Path, source_path: Path | None) -> Path | None:
-    """Find the prior (prompt) file for an mb file.
+def get_prior_file(mb_path: Path) -> Path | None:
+    """Extract prior file reference from an mb file.
 
-    Looks for prompt files with the same base name.
-    Uses either the mb file or source file as the reference for base name.
+    Looks for @prior directive in the mb file.
     """
-    # Try to find prior based on base name
-    # Extract base name (e.g., "001" from "001.out.txt" or "001.mb")
-    ref_path = source_path if source_path else mb_path
+    _, prior_value = parse_mb_directives(mb_path)
 
-    # Get the base name before any extension markers
-    stem = ref_path.stem
-    # Handle compound extensions like "001.out" -> "001"
-    base_name = stem.split(".")[0]
-
-    # Look for prior file types
-    prior_extensions = [".prompt.txt", ".prompt.md"]
-    search_dir = mb_path.parent
-
-    for ext in prior_extensions:
-        prior_path = search_dir / f"{base_name}{ext}"
-        if prior_path.exists():
-            return prior_path
+    if prior_value:
+        return mb_path.parent / prior_value
 
     return None
 
@@ -75,7 +93,7 @@ def collect_files(
 
     # Get source and prior files
     source_path = get_source_file(mb_path)
-    prior_path = get_prior_file(mb_path, source_path)
+    prior_path = get_prior_file(mb_path)
 
     # Collect the files
     files_to_copy = [
@@ -96,7 +114,7 @@ def collect_files(
         else:
             warnings.append(f"prior file not found: {prior_path}")
     else:
-        warnings.append(f"no prior file found for: {mb_path.name}")
+        warnings.append(f"no @prior directive in: {mb_path.name}")
 
     # Copy files
     for file_type, file_path in files_to_copy:
@@ -143,7 +161,7 @@ def collect_cmd(
 
     For each mb file, this command finds:
     - The source file (from @source directive in the mb file)
-    - The prior/prompt file (by naming convention)
+    - The prior file (from @prior directive in the mb file)
 
     And copies all three to the destination directory.
 
