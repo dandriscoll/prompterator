@@ -165,6 +165,116 @@ workflow:
 Each role can use a different LLM provider or settings. For example, you might use
 a larger model for the Author and a faster model for the Critic.
 
+## File Naming Tool (ft)
+
+Prompterator includes a file naming tool (`ft`) that manages filenames according to
+a structured naming convention. The tool implements the
+[Boutiques](https://boutiques.github.io/) descriptor format for self-documentation
+and introspection.
+
+### Boutiques Contract
+
+Tools implementing the Boutiques contract provide:
+
+- `--descriptor` — Machine-readable JSON schema describing the tool
+- `--help` — Human-readable usage documentation
+
+```bash
+# Get JSON descriptor for programmatic introspection
+ft --descriptor
+
+# Get human-readable help
+ft --help
+```
+
+The descriptor includes:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Tool identifier |
+| `description` | Human-readable description |
+| `tool-version` | Semantic version of the tool |
+| `schema-version` | Boutiques schema version (0.5) |
+| `x-spec-url` | Link to full Boutiques schema |
+| `command-line` | Command template with placeholders |
+| `inputs` | Array of input parameter definitions |
+| `output-files` | Description of tool outputs |
+| `groups` | Logical groupings of related inputs |
+| `custom` | Tool-specific metadata (operations, patterns) |
+
+For the full Boutiques schema specification, see:
+https://github.com/boutiques/boutiques/blob/master/boutiques/schema/descriptor.schema.json
+
+### Implementing a Compatible Tool
+
+To implement a tool compatible with this contract:
+
+1. Embed a JSON descriptor following the Boutiques schema
+2. Output the descriptor when invoked with `--descriptor`
+3. Output help text when invoked with `--help` or `-h`
+4. Document operations in `custom.operations` with examples
+5. Use standard exit codes (0 for success, non-zero for failure)
+
+Example descriptor structure:
+
+```json
+{
+  "name": "mytool",
+  "description": "Tool description",
+  "tool-version": "1.0.0",
+  "schema-version": "0.5",
+  "x-spec-url": "https://github.com/boutiques/boutiques/blob/master/boutiques/schema/descriptor.schema.json",
+  "command-line": "mytool [OPERATION] [ARGS]",
+  "inputs": [
+    {
+      "id": "operation",
+      "name": "Operation",
+      "description": "The operation to perform",
+      "type": "String",
+      "optional": true,
+      "value-key": "[OPERATION]",
+      "value-choices": ["list", "create", "delete"]
+    }
+  ],
+  "output-files": [
+    {
+      "id": "stdout_output",
+      "name": "Standard output",
+      "description": "Operation result",
+      "path-template": "-",
+      "optional": false
+    }
+  ],
+  "custom": {
+    "operations": {
+      "list": {
+        "description": "List all items",
+        "arguments": [],
+        "examples": ["mytool list"]
+      }
+    }
+  }
+}
+```
+
+### Filename Convention
+
+The `ft` tool uses the pattern: `[index][variation?][-name?][.extension]`
+
+- `index` — Zero-padded digits (e.g., `001`, `0042`)
+- `variation` — Lowercase letters for alternates (`a`, `b`, ..., `z`, `za`, `zb`, ...)
+- `name` — Optional descriptor, hyphen-prefixed
+- `extension` — Type-specific extension
+
+### Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `config` | Print tool configuration |
+| `propose <path> <type>` | Propose new filename with target type |
+| `ready <path>` | Check if file is ready for transformation |
+| `bundles [dir]` | List file bundles in directory |
+
 ## File Formats
 
 ### Feedback (.mb)

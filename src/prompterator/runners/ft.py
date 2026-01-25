@@ -1,9 +1,11 @@
 """Subprocess wrapper for the ft file naming tool."""
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 class FTError(Exception):
@@ -99,6 +101,27 @@ class FTClient:
         self._executable = _find_ft_executable(executable)
         self._timeout = timeout
         self._config: FTConfig | None = None
+        self._descriptor: dict[str, Any] | None = None
+
+    def descriptor(self) -> dict[str, Any]:
+        """Get the Boutiques descriptor for the ft tool.
+
+        Returns:
+            Dictionary containing the Boutiques descriptor JSON.
+
+        Raises:
+            FTError: If the tool doesn't support --descriptor.
+        """
+        if self._descriptor is not None:
+            return self._descriptor
+
+        output = _run_ft(self._executable, ["--descriptor"], self._timeout)
+        try:
+            self._descriptor = json.loads(output)
+        except json.JSONDecodeError as e:
+            raise FTError(f"Invalid JSON from --descriptor: {e}")
+
+        return self._descriptor
 
     def config(self) -> FTConfig:
         """Get ft configuration.

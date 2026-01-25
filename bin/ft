@@ -1,13 +1,145 @@
 #!/usr/bin/env python3
 """ft - File naming tool for prompterator.
 
-Implements the naming contract defined in docs/NAMING_CONTRACT.md.
+Implements the Boutiques contract. See README.md for documentation.
 """
 
-import os
+import json
 import re
 import sys
 from pathlib import Path
+
+# Boutiques descriptor schema: https://github.com/boutiques/boutiques/blob/master/boutiques/schema/descriptor.schema.json
+# Invocation docs: https://boutiques.github.io/doc/_invocation.html
+# General docs: https://boutiques.github.io/
+BOUTIQUES_DESCRIPTOR = {
+    "name": "ft",
+    "description": "File naming tool. Manages filenames according to a structured naming convention: [index][variation?][-name?][.extension]. For full Boutiques spec, see: https://github.com/boutiques/boutiques/blob/master/boutiques/schema/descriptor.schema.json",
+    "tool-version": "1.0.0",
+    "schema-version": "0.5",
+    "x-spec-url": "https://github.com/boutiques/boutiques/blob/master/boutiques/schema/descriptor.schema.json",
+    "command-line": "ft [OPERATION] [PATH] [TYPE]",
+    "inputs": [
+        {
+            "id": "operation",
+            "name": "Operation",
+            "description": "The operation to perform: config, propose, ready, bundles",
+            "type": "String",
+            "optional": True,
+            "value-key": "[OPERATION]",
+            "value-choices": ["config", "propose", "ready", "bundles"],
+        },
+        {
+            "id": "path",
+            "name": "Path",
+            "description": "File path argument for propose, ready operations; directory for bundles",
+            "type": "String",
+            "optional": True,
+            "value-key": "[PATH]",
+        },
+        {
+            "id": "type",
+            "name": "Type",
+            "description": "Target file type for propose operation",
+            "type": "String",
+            "optional": True,
+            "value-key": "[TYPE]",
+        },
+    ],
+    "output-files": [
+        {
+            "id": "stdout_output",
+            "name": "Standard output",
+            "description": "Operation result: config info, proposed filename, ready status (true/false), or bundle listing",
+            "path-template": "-",
+            "optional": False,
+        }
+    ],
+    "groups": [
+        {
+            "id": "operations",
+            "name": "Operations",
+            "description": "Available operations: config (print configuration), propose (generate new filename), ready (check if transformable), bundles (list file bundles)",
+            "members": ["operation", "path", "type"],
+        }
+    ],
+    "custom": {
+        "operations": {
+            "config": {
+                "description": "Print tool configuration (prior-types, source-type, feedback-type)",
+                "arguments": [],
+                "examples": ["ft config"],
+            },
+            "propose": {
+                "description": "Propose new filename derived from path with target type",
+                "arguments": ["path", "type"],
+                "examples": [
+                    "ft propose 001.input.txt output.txt -> ./001.output.txt",
+                    "ft propose 001.output.txt output.txt -> ./001a.output.txt",
+                ],
+            },
+            "ready": {
+                "description": "Check if file is ready for transformation (returns true/false)",
+                "arguments": ["path"],
+                "examples": [
+                    "ft ready 001.input.txt -> true",
+                    "ft ready 001.output.txt -> false",
+                ],
+            },
+            "bundles": {
+                "description": "List browsable bundles in directory (prior files with associated sources)",
+                "arguments": ["path"],
+                "examples": ["ft bundles -> 001.input.txt\\t001.output.txt,001a.output.txt"],
+            },
+        },
+        "filename_pattern": "[index][variation?][-name?][.extension]",
+    },
+}
+
+
+def print_descriptor() -> None:
+    """Print Boutiques descriptor JSON and exit."""
+    print(json.dumps(BOUTIQUES_DESCRIPTOR, indent=2))
+    sys.exit(0)
+
+
+def print_help() -> None:
+    """Print help message and exit."""
+    help_text = """\
+ft - File naming tool
+
+USAGE:
+    ft <operation> [arguments...]
+    ft --descriptor
+    ft --help
+
+OPERATIONS:
+    config              Print tool configuration
+    propose <path> <type>
+                        Propose new filename derived from path with target type
+    ready <path>        Check if file is ready for transformation
+    bundles [dir]       List browsable bundles in directory
+
+OPTIONS:
+    --descriptor        Print Boutiques descriptor JSON and exit
+    --help, -h          Print this help message and exit
+
+FILENAME STRUCTURE:
+    [index][variation?][-name?][.extension]
+
+    index      - Zero-padded digits (e.g., 001, 0042)
+    variation  - Lowercase letters for alternates (a, b, ..., z, za, zb, ...)
+    name       - Optional descriptor, hyphen-prefixed
+
+EXAMPLES:
+    ft config
+    ft propose 001.input.txt output.txt
+    ft ready 001.input.txt
+    ft bundles ./prompts
+"""
+    print(help_text)
+    sys.exit(0)
+
 
 # File type definitions
 TYPES = {
@@ -227,13 +359,16 @@ def cmd_bundles(directory: str = ".") -> None:
 def main() -> None:
     """Main entry point."""
     if len(sys.argv) < 2:
-        print("Usage: ft <command> [args...]", file=sys.stderr)
-        print("Commands: config, propose, ready, bundles", file=sys.stderr)
-        sys.exit(1)
+        print_help()
 
     command = sys.argv[1]
 
-    if command == "config":
+    # Handle --descriptor and --help before anything else
+    if command == "--descriptor":
+        print_descriptor()
+    elif command in ("--help", "-h"):
+        print_help()
+    elif command == "config":
         cmd_config()
     elif command == "propose":
         if len(sys.argv) != 4:
