@@ -28,8 +28,21 @@ def parse_mb_directives(mb_path: Path) -> tuple[str | None, str | None]:
     if result.records:
         rec = result.records[0]
         source_value = rec.source.value if rec.source else None
-        prior_value = rec.prior.value if rec.prior else None
-        return source_value, prior_value
+        prior_value = None
+        if hasattr(rec, "prior") and rec.prior:
+            prior_value = rec.prior.value
+        if source_value or prior_value:
+            # Only return early if we got at least one value from markback
+            # Otherwise fall through to manual parsing
+            if not prior_value:
+                # Try manual parsing for prior
+                content = mb_path.read_text()
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.startswith("@prior "):
+                        prior_value = line[7:].strip()
+                        break
+            return source_value, prior_value
 
     # Fall back to manual parsing for files without feedback lines
     content = mb_path.read_text()
