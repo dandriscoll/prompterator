@@ -16,8 +16,8 @@ class DirectoriesConfig(BaseModel):
     results: str = Field(default=".prompterator/results", description="Directory for result files")
 
 
-class LLMConfig(BaseModel):
-    """LLM runner configuration."""
+class LLMRoleConfig(BaseModel):
+    """Base LLM configuration for a role."""
 
     runner: str = Field(
         default="anthropic",
@@ -25,6 +25,24 @@ class LLMConfig(BaseModel):
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
     max_tokens: int = Field(default=4096, gt=0, description="Maximum tokens to generate")
+
+
+class AuthorConfig(LLMRoleConfig):
+    """Author LLM configuration - takes a prior and produces a source."""
+
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
+
+
+class EditorConfig(LLMRoleConfig):
+    """Editor LLM configuration - turns feedback into evals and makes changes to prompts."""
+
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
+
+
+class CriticConfig(LLMRoleConfig):
+    """Critic LLM configuration - runs evals."""
+
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0, description="Sampling temperature")
 
 
 class FeedbackConfig(BaseModel):
@@ -65,7 +83,9 @@ class Config(BaseModel):
 
     version: str = Field(default="1.0", description="Config file version")
     directories: DirectoriesConfig = Field(default_factory=DirectoriesConfig)
-    llm: LLMConfig = Field(default_factory=LLMConfig)
+    author: AuthorConfig = Field(default_factory=AuthorConfig)
+    editor: EditorConfig = Field(default_factory=EditorConfig)
+    critic: CriticConfig = Field(default_factory=CriticConfig)
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
     ft: FTConfig = Field(default_factory=FTConfig)
     workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
@@ -89,10 +109,20 @@ class Config(BaseModel):
                 "evals": self.directories.evals,
                 "results": self.directories.results,
             },
-            "llm": {
-                "runner": self.llm.runner,
-                "temperature": self.llm.temperature,
-                "max_tokens": self.llm.max_tokens,
+            "author": {
+                "runner": self.author.runner,
+                "temperature": self.author.temperature,
+                "max_tokens": self.author.max_tokens,
+            },
+            "editor": {
+                "runner": self.editor.runner,
+                "temperature": self.editor.temperature,
+                "max_tokens": self.editor.max_tokens,
+            },
+            "critic": {
+                "runner": self.critic.runner,
+                "temperature": self.critic.temperature,
+                "max_tokens": self.critic.max_tokens,
             },
             "feedback": {
                 "categories": self.feedback.categories,

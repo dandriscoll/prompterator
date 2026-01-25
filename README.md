@@ -41,14 +41,62 @@ prompterator test 001a.prompt.txt
 prompterator status
 ```
 
+## Conceptual Model
+
+Prompterator uses three distinct LLM roles, each with a specific responsibility:
+
+```
+                    ┌─────────┐
+                    │  Prior  │
+                    └────┬────┘
+                         │
+                         ▼
+                    ┌─────────┐
+                    │ Author  │  Takes a prior, produces a source
+                    └────┬────┘
+                         │
+                         ▼
+                    ┌─────────┐
+    Feedback ──────▶│ Editor  │  Turns feedback into evals,
+                    └────┬────┘  makes changes to prompts
+                         │
+                         ▼
+                    ┌─────────┐
+                    │ Critic  │  Runs evals
+                    └────┬────┘
+                         │
+                         ▼
+                    ┌─────────┐
+                    │ Results │
+                    └─────────┘
+```
+
+### Author
+
+The **Author** takes a prior (context, requirements, examples) and produces a source
+(the initial prompt). This is the generative, creative role.
+
+### Editor
+
+The **Editor** has two responsibilities:
+1. **Feedback → Evals**: Transforms human feedback into structured evaluation criteria
+2. **Prompt Changes**: Improves prompts based on identified issues
+
+The Editor is iterative and refinement-focused, working to address specific concerns.
+
+### Critic
+
+The **Critic** runs evaluations against prompts and produces objective assessments.
+It uses a lower temperature (0.3 by default) for consistent, reproducible judgments.
+
 ## Workflow
 
 1. Create prompt files (`.prompt.txt` or `.prompt.md`)
 2. Annotate with feedback in `.mb` markback files
 3. Run `prompterator issues` to consolidate feedback
 4. Run `prompterator evals` to generate evaluations
-5. Run `prompterator improve <prompt>` to generate improvements
-6. Run `prompterator test <prompt>` to validate improvements
+5. Run `prompterator improve <prompt>` to generate improvements (Editor)
+6. Run `prompterator test <prompt>` to validate improvements (Critic)
 
 ## Git Mode
 
@@ -86,9 +134,20 @@ directories:
   evals: ".prompterator/evals"
   results: ".prompterator/results"
 
-llm:
+# LLM roles (see Conceptual Model above)
+author:
   runner: "anthropic"
   temperature: 0.7
+  max_tokens: 4096
+
+editor:
+  runner: "anthropic"
+  temperature: 0.7
+  max_tokens: 4096
+
+critic:
+  runner: "anthropic"
+  temperature: 0.3  # Lower for consistent evaluation
   max_tokens: 4096
 
 feedback:
@@ -102,6 +161,9 @@ ft:
 workflow:
   git_mode: false  # Set to true for in-place editing
 ```
+
+Each role can use a different LLM provider or settings. For example, you might use
+a larger model for the Author and a faster model for the Critic.
 
 ## File Formats
 

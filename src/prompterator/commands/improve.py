@@ -73,15 +73,15 @@ def improve_cmd(
     click.echo(f"Based on: {len(issue_file.issues)} issues from {issues_path.name}")
     click.echo()
 
-    # Initialize LLM client
+    # Initialize Editor LLM client
     try:
         llm = LLMClient(
-            runner=config.llm.runner,
-            temperature=config.llm.temperature,
-            max_tokens=config.llm.max_tokens,
+            runner=config.editor.runner,
+            temperature=config.editor.temperature,
+            max_tokens=config.editor.max_tokens,
         )
     except LLMError as e:
-        click.echo(f"LLM error: {e}", err=True)
+        click.echo(f"Editor LLM error: {e}", err=True)
         raise SystemExit(1)
 
     # Generate improved prompt

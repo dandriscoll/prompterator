@@ -67,15 +67,15 @@ def test_cmd(
     click.echo(f"Evals: {len(eval_file.evals)} from {evals_path.name}")
     click.echo()
 
-    # Initialize LLM client
+    # Initialize Critic LLM client
     try:
         llm = LLMClient(
-            runner=config.llm.runner,
-            temperature=config.llm.temperature,
-            max_tokens=config.llm.max_tokens,
+            runner=config.critic.runner,
+            temperature=config.critic.temperature,
+            max_tokens=config.critic.max_tokens,
         )
     except LLMError as e:
-        click.echo(f"LLM error: {e}", err=True)
+        click.echo(f"Critic LLM error: {e}", err=True)
         raise SystemExit(1)
 
     # Run evaluations

@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 
 from prompterator.config.loader import CONFIG_FILENAME, save_config
-from prompterator.config.schema import Config, LLMConfig
+from prompterator.config.schema import AuthorConfig, Config, CriticConfig, EditorConfig
 
 
 RUNNER_CHOICES = ["anthropic", "openai", "custom"]
@@ -35,27 +35,15 @@ def _prompt_for_runner() -> str:
     return runner
 
 
-def _create_llm_config(runner: str) -> LLMConfig:
-    """Create LLM config based on runner choice."""
-    if runner == "anthropic":
-        return LLMConfig(
-            runner="anthropic",
-            temperature=0.7,
-            max_tokens=4096,
-        )
-    elif runner == "openai":
-        return LLMConfig(
-            runner="openai",
-            temperature=0.7,
-            max_tokens=4096,
-        )
-    else:
-        # Custom runner
-        return LLMConfig(
-            runner=runner,
-            temperature=0.7,
-            max_tokens=4096,
-        )
+def _create_role_configs(
+    runner: str,
+) -> tuple[AuthorConfig, EditorConfig, CriticConfig]:
+    """Create LLM configs for all roles based on runner choice."""
+    return (
+        AuthorConfig(runner=runner, temperature=0.7, max_tokens=4096),
+        EditorConfig(runner=runner, temperature=0.7, max_tokens=4096),
+        CriticConfig(runner=runner, temperature=0.3, max_tokens=4096),
+    )
 
 
 @click.command("init")
@@ -74,18 +62,18 @@ def init_cmd(force: bool) -> None:
         raise SystemExit(1)
 
     runner = _prompt_for_runner()
-    llm_config = _create_llm_config(runner)
+    author_config, editor_config, critic_config = _create_role_configs(runner)
 
-    config = Config(llm=llm_config)
+    config = Config(author=author_config, editor=editor_config, critic=critic_config)
     save_config(config, config_path)
 
     click.echo()
     click.echo(f"Created {CONFIG_FILENAME}")
     click.echo()
-    click.echo("LLM configuration:")
-    click.echo(f"  runner:      {config.llm.runner}")
-    click.echo(f"  temperature: {config.llm.temperature}")
-    click.echo(f"  max_tokens:  {config.llm.max_tokens}")
+    click.echo("LLM Roles:")
+    click.echo(f"  Author: {config.author.runner} (temp={config.author.temperature})")
+    click.echo(f"  Editor: {config.editor.runner} (temp={config.editor.temperature})")
+    click.echo(f"  Critic: {config.critic.runner} (temp={config.critic.temperature})")
     click.echo()
     click.echo("Default directories:")
     click.echo(f"  prompts:  {config.directories.prompts}")

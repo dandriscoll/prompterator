@@ -115,9 +115,9 @@ def status_cmd(verbose: bool) -> None:
     else:
         click.echo("  - Workflow complete! Review results in " + str(results_dir))
 
-    # LLM configuration
+    # LLM Role Configurations
     click.echo()
-    click.echo("LLM Configuration:")
-    click.echo(f"  Runner: {config.llm.runner}")
-    click.echo(f"  Temperature: {config.llm.temperature}")
-    click.echo(f"  Max tokens: {config.llm.max_tokens}")
+    click.echo("LLM Roles:")
+    click.echo(f"  Author: {config.author.runner} (temp={config.author.temperature})")
+    click.echo(f"  Editor: {config.editor.runner} (temp={config.editor.temperature})")
+    click.echo(f"  Critic: {config.critic.runner} (temp={config.critic.temperature})")
