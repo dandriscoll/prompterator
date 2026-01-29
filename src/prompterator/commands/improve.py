@@ -7,7 +7,7 @@ import click
 from prompterator.config.loader import get_config_base_dir, load_config
 from prompterator.core.improver import generate_improved_prompt, save_improved_prompt
 from prompterator.core.issue import load_issue_file
-from prompterator.runners.ft import FTClient, FTError
+from prompterator.runners.naming import NamingClient, NamingError
 from prompterator.runners.llm import LLMClient, LLMError
 
 
@@ -112,19 +112,19 @@ def improve_cmd(
     else:
         # Normal mode: create a new variation
         try:
-            ft = FTClient(
-                executable=config.ft.executable,
-                timeout=config.ft.timeout,
+            naming = NamingClient(
+                executable=config.naming.executable,
+                timeout=config.naming.timeout,
             )
-            ft_config = ft.config()
+            naming_config = naming.config()
 
             # Get the primary prior type
-            prior_type = ft_config.prior_types[0] if ft_config.prior_types else "prompt.txt"
-            output_str = ft.propose(str(prompt), prior_type)
+            prior_type = naming_config.prior_types[0] if naming_config.prior_types else "prompt.txt"
+            output_str = naming.propose(str(prompt), prior_type)
             output = Path(output_str)
-        except FTError as e:
+        except NamingError as e:
             # Fallback to simple naming
-            click.echo(f"Warning: ft tool error ({e}), using fallback naming", err=True)
+            click.echo(f"Warning: naming tool error ({e}), using fallback naming", err=True)
             stem = prompt.stem.split(".")[0]
             output = prompt.parent / f"{stem}a.prompt.txt"
 

@@ -1,4 +1,4 @@
-"""Subprocess wrapper for the ft file naming tool."""
+"""Subprocess wrapper for the naming file naming tool."""
 
 import json
 import shutil
@@ -8,60 +8,60 @@ from pathlib import Path
 from typing import Any
 
 
-class FTError(Exception):
-    """Error from ft tool."""
+class NamingError(Exception):
+    """Error from naming tool."""
 
     pass
 
 
 @dataclass
-class FTConfig:
-    """Configuration returned by ft config."""
+class NamingToolConfig:
+    """Configuration returned by naming config."""
 
     prior_types: list[str]
     source_type: str
     feedback_type: str
 
 
-def _find_ft_executable(configured_path: str) -> str:
-    """Find the ft executable path.
+def _find_naming_executable(configured_path: str) -> str:
+    """Find the naming executable path.
 
     Args:
-        configured_path: Path from config, or "ft" for default.
+        configured_path: Path from config, or "naming" for default.
 
     Returns:
         Resolved path to executable.
 
     Raises:
-        FTError: If executable not found.
+        NamingError: If executable not found.
     """
-    if configured_path == "ft":
-        # Look for bundled ft in package
+    if configured_path == "naming":
+        # Look for bundled naming in package
         package_dir = Path(__file__).parent.parent.parent.parent
-        bundled_ft = package_dir / "bin" / "ft"
-        if bundled_ft.exists():
-            return str(bundled_ft)
+        bundled_naming = package_dir / "bin" / "naming"
+        if bundled_naming.exists():
+            return str(bundled_naming)
 
         # Fall back to PATH
-        found = shutil.which("ft")
+        found = shutil.which("naming")
         if found:
             return found
 
-        raise FTError("ft tool not found. Install prompterator or provide path in config.")
+        raise NamingError("naming tool not found. Install prompterator or provide path in config.")
 
     # Custom path
     path = Path(configured_path)
     if path.exists():
         return str(path)
 
-    raise FTError(f"ft tool not found at configured path: {configured_path}")
+    raise NamingError(f"naming tool not found at configured path: {configured_path}")
 
 
-def _run_ft(executable: str, args: list[str], timeout: int = 30) -> str:
-    """Run ft command and return stdout.
+def _run_naming(executable: str, args: list[str], timeout: int = 30) -> str:
+    """Run naming command and return stdout.
 
     Args:
-        executable: Path to ft executable.
+        executable: Path to naming executable.
         args: Command arguments.
         timeout: Timeout in seconds.
 
@@ -69,7 +69,7 @@ def _run_ft(executable: str, args: list[str], timeout: int = 30) -> str:
         stdout output.
 
     Raises:
-        FTError: On command failure.
+        NamingError: On command failure.
     """
     try:
         result = subprocess.run(
@@ -81,58 +81,58 @@ def _run_ft(executable: str, args: list[str], timeout: int = 30) -> str:
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        raise FTError(f"ft command failed: {e.stderr or e.stdout}")
+        raise NamingError(f"naming command failed: {e.stderr or e.stdout}")
     except subprocess.TimeoutExpired:
-        raise FTError(f"ft command timed out after {timeout}s")
+        raise NamingError(f"naming command timed out after {timeout}s")
     except FileNotFoundError:
-        raise FTError(f"ft executable not found: {executable}")
+        raise NamingError(f"naming executable not found: {executable}")
 
 
-class FTClient:
-    """Client for interacting with the ft tool."""
+class NamingClient:
+    """Client for interacting with the naming tool."""
 
-    def __init__(self, executable: str = "ft", timeout: int = 30):
-        """Initialize FT client.
+    def __init__(self, executable: str = "naming", timeout: int = 30):
+        """Initialize naming client.
 
         Args:
-            executable: Path to ft executable or "ft" for default.
+            executable: Path to naming executable or "naming" for default.
             timeout: Command timeout in seconds.
         """
-        self._executable = _find_ft_executable(executable)
+        self._executable = _find_naming_executable(executable)
         self._timeout = timeout
-        self._config: FTConfig | None = None
+        self._config: NamingToolConfig | None = None
         self._descriptor: dict[str, Any] | None = None
 
     def descriptor(self) -> dict[str, Any]:
-        """Get the Boutiques descriptor for the ft tool.
+        """Get the Boutiques descriptor for the naming tool.
 
         Returns:
             Dictionary containing the Boutiques descriptor JSON.
 
         Raises:
-            FTError: If the tool doesn't support --descriptor.
+            NamingError: If the tool doesn't support --descriptor.
         """
         if self._descriptor is not None:
             return self._descriptor
 
-        output = _run_ft(self._executable, ["--descriptor"], self._timeout)
+        output = _run_naming(self._executable, ["--descriptor"], self._timeout)
         try:
             self._descriptor = json.loads(output)
         except json.JSONDecodeError as e:
-            raise FTError(f"Invalid JSON from --descriptor: {e}")
+            raise NamingError(f"Invalid JSON from --descriptor: {e}")
 
         return self._descriptor
 
-    def config(self) -> FTConfig:
-        """Get ft configuration.
+    def config(self) -> NamingToolConfig:
+        """Get naming configuration.
 
         Returns:
-            FTConfig with type information.
+            NamingToolConfig with type information.
         """
         if self._config is not None:
             return self._config
 
-        output = _run_ft(self._executable, ["config"], self._timeout)
+        output = _run_naming(self._executable, ["config"], self._timeout)
 
         prior_types = []
         source_type = ""
@@ -146,7 +146,7 @@ class FTClient:
             elif line.startswith("feedback-type:"):
                 feedback_type = line.split(":", 1)[1].strip()
 
-        self._config = FTConfig(
+        self._config = NamingToolConfig(
             prior_types=prior_types,
             source_type=source_type,
             feedback_type=feedback_type,
@@ -163,7 +163,7 @@ class FTClient:
         Returns:
             Proposed filename path.
         """
-        return _run_ft(self._executable, ["propose", str(path), target_type], self._timeout)
+        return _run_naming(self._executable, ["propose", str(path), target_type], self._timeout)
 
     def ready(self, path: str | Path) -> bool:
         """Check if a file is ready for transformation.
@@ -174,7 +174,7 @@ class FTClient:
         Returns:
             True if file is ready, False otherwise.
         """
-        output = _run_ft(self._executable, ["ready", str(path)], self._timeout)
+        output = _run_naming(self._executable, ["ready", str(path)], self._timeout)
         return output.lower() == "true"
 
     def bundles(self, directory: str | Path = ".") -> list[tuple[str, list[str]]]:
@@ -186,7 +186,7 @@ class FTClient:
         Returns:
             List of (prior, [sources]) tuples.
         """
-        output = _run_ft(self._executable, ["bundles", str(directory)], self._timeout)
+        output = _run_naming(self._executable, ["bundles", str(directory)], self._timeout)
 
         bundles = []
         for line in output.split("\n"):

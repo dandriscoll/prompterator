@@ -59,12 +59,12 @@ class FeedbackConfig(BaseModel):
     )
 
 
-class FTConfig(BaseModel):
+class NamingConfig(BaseModel):
     """File naming tool configuration."""
 
     executable: str = Field(
-        default="ft",
-        description="Path to ft executable or 'ft' for default",
+        default="naming",
+        description="Path to naming executable or 'naming' for default",
     )
     timeout: int = Field(default=30, gt=0, description="Command timeout in seconds")
 
@@ -87,7 +87,7 @@ class Config(BaseModel):
     editor: EditorConfig = Field(default_factory=EditorConfig)
     critic: CriticConfig = Field(default_factory=CriticConfig)
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
-    ft: FTConfig = Field(default_factory=FTConfig)
+    naming: NamingConfig = Field(default_factory=NamingConfig)
     workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
 
     def get_dir(self, name: Literal["prompts", "feedback", "issues", "evals", "results"], base: Path) -> Path:
@@ -128,9 +128,9 @@ class Config(BaseModel):
                 "categories": self.feedback.categories,
                 "min_occurrences": self.feedback.min_occurrences,
             },
-            "ft": {
-                "executable": self.ft.executable,
-                "timeout": self.ft.timeout,
+            "naming": {
+                "executable": self.naming.executable,
+                "timeout": self.naming.timeout,
             },
             "workflow": {
                 "git_mode": self.workflow.git_mode,
