@@ -15,7 +15,7 @@ def _find_llm_executable(runner: str) -> str:
     """Find the LLM runner executable path.
 
     Args:
-        runner: "anthropic", "openai", or path to custom script.
+        runner: "anthropic", "openai", "azure-openai", or path to custom script.
 
     Returns:
         Resolved path to executable.
@@ -24,7 +24,7 @@ def _find_llm_executable(runner: str) -> str:
         LLMError: If executable not found.
     """
     # Map shorthand names to bundled scripts
-    if runner in ("anthropic", "openai"):
+    if runner in ("anthropic", "openai", "azure-openai"):
         script_name = f"llm-{runner}"
 
         # Look for bundled script in package
@@ -61,17 +61,26 @@ class LLMClient:
         runner: str = "anthropic",
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        model: str | None = None,
+        endpoint: str | None = None,
+        api_version: str | None = None,
     ):
         """Initialize LLM client.
 
         Args:
-            runner: "anthropic", "openai", or path to custom script.
+            runner: "anthropic", "openai", "azure-openai", or path to custom script.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
+            model: Model name or deployment ID.
+            endpoint: API endpoint URL.
+            api_version: API version (for Azure OpenAI).
         """
         self._executable = _find_llm_executable(runner)
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._model = model
+        self._endpoint = endpoint
+        self._api_version = api_version
 
     def generate(
         self,
@@ -106,6 +115,15 @@ class LLMClient:
 
         tokens = max_tokens if max_tokens is not None else self._max_tokens
         args.extend(["--max-tokens", str(tokens)])
+
+        if self._model:
+            args.extend(["--model", self._model])
+
+        if self._endpoint:
+            args.extend(["--endpoint", self._endpoint])
+
+        if self._api_version:
+            args.extend(["--api-version", self._api_version])
 
         try:
             result = subprocess.run(

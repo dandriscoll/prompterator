@@ -16,6 +16,8 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum tokens to generate")
     parser.add_argument("--model", default="claude-sonnet-4-20250514", help="Model to use")
+    parser.add_argument("--endpoint", help="API base URL (overrides ANTHROPIC_BASE_URL)")
+    parser.add_argument("--api-version", help="API version (ignored for Anthropic)")
     args = parser.parse_args()
 
     # Check for API key
@@ -23,6 +25,9 @@ def main() -> None:
     if not api_key:
         print("Error: ANTHROPIC_API_KEY environment variable not set", file=sys.stderr)
         sys.exit(1)
+
+    # Get base URL from argument or environment
+    base_url = args.endpoint or os.environ.get("ANTHROPIC_BASE_URL")
 
     # Read prompt from stdin
     prompt = sys.stdin.read().strip()
@@ -38,7 +43,10 @@ def main() -> None:
         sys.exit(1)
 
     # Create client and make request
-    client = anthropic.Anthropic(api_key=api_key)
+    client_kwargs = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = anthropic.Anthropic(**client_kwargs)
 
     messages = [{"role": "user", "content": prompt}]
 

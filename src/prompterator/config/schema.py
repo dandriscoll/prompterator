@@ -21,7 +21,19 @@ class LLMRoleConfig(BaseModel):
 
     runner: str = Field(
         default="anthropic",
-        description="LLM runner: 'anthropic', 'openai', or path to custom script",
+        description="LLM runner: 'anthropic', 'openai', 'azure-openai', or path to custom script",
+    )
+    model: str | None = Field(
+        default=None,
+        description="Model name or deployment ID (e.g., 'gpt-4o', 'claude-sonnet-4-20250514')",
+    )
+    endpoint: str | None = Field(
+        default=None,
+        description="API endpoint URL (overrides environment variable)",
+    )
+    api_version: str | None = Field(
+        default=None,
+        description="API version (for Azure OpenAI)",
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
     max_tokens: int = Field(default=4096, gt=0, description="Maximum tokens to generate")
@@ -98,6 +110,22 @@ class Config(BaseModel):
             path = base / path
         return path
 
+    @staticmethod
+    def _role_to_dict(role: LLMRoleConfig) -> dict:
+        """Convert role config to dict, omitting None values."""
+        d = {
+            "runner": role.runner,
+            "temperature": role.temperature,
+            "max_tokens": role.max_tokens,
+        }
+        if role.model is not None:
+            d["model"] = role.model
+        if role.endpoint is not None:
+            d["endpoint"] = role.endpoint
+        if role.api_version is not None:
+            d["api_version"] = role.api_version
+        return d
+
     def to_yaml_dict(self) -> dict:
         """Convert to dictionary suitable for YAML serialization."""
         return {
@@ -109,21 +137,9 @@ class Config(BaseModel):
                 "evals": self.directories.evals,
                 "results": self.directories.results,
             },
-            "author": {
-                "runner": self.author.runner,
-                "temperature": self.author.temperature,
-                "max_tokens": self.author.max_tokens,
-            },
-            "editor": {
-                "runner": self.editor.runner,
-                "temperature": self.editor.temperature,
-                "max_tokens": self.editor.max_tokens,
-            },
-            "critic": {
-                "runner": self.critic.runner,
-                "temperature": self.critic.temperature,
-                "max_tokens": self.critic.max_tokens,
-            },
+            "author": self._role_to_dict(self.author),
+            "editor": self._role_to_dict(self.editor),
+            "critic": self._role_to_dict(self.critic),
             "feedback": {
                 "categories": self.feedback.categories,
                 "min_occurrences": self.feedback.min_occurrences,

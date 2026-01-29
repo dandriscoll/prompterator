@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""LLM runner for OpenAI API.
+"""LLM runner for Azure OpenAI API.
 
 Reads prompt from stdin, outputs response to stdout.
-Requires OPENAI_API_KEY environment variable.
+Requires AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT environment variables.
 """
 
 import argparse
@@ -11,23 +11,25 @@ import sys
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OpenAI LLM runner")
+    parser = argparse.ArgumentParser(description="Azure OpenAI LLM runner")
     parser.add_argument("--system", help="System prompt")
     parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum tokens to generate")
-    parser.add_argument("--model", default="gpt-4o", help="Model to use")
-    parser.add_argument("--endpoint", help="API base URL (overrides OPENAI_BASE_URL)")
-    parser.add_argument("--api-version", help="API version (ignored for OpenAI)")
+    parser.add_argument("--model", default="gpt-4o", help="Deployment name to use")
+    parser.add_argument("--endpoint", help="Azure OpenAI endpoint URL (overrides AZURE_OPENAI_ENDPOINT)")
+    parser.add_argument("--api-version", default="2024-02-01", help="Azure OpenAI API version")
     args = parser.parse_args()
 
-    # Check for API key
-    api_key = os.environ.get("OPENAI_API_KEY")
+    # Check for required environment variables
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY")
     if not api_key:
-        print("Error: OPENAI_API_KEY environment variable not set", file=sys.stderr)
+        print("Error: AZURE_OPENAI_API_KEY environment variable not set", file=sys.stderr)
         sys.exit(1)
 
-    # Get base URL from argument or environment
-    base_url = args.endpoint or os.environ.get("OPENAI_BASE_URL")
+    endpoint = args.endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT")
+    if not endpoint:
+        print("Error: No endpoint provided. Set AZURE_OPENAI_ENDPOINT or use --endpoint", file=sys.stderr)
+        sys.exit(1)
 
     # Read prompt from stdin
     prompt = sys.stdin.read().strip()
@@ -36,17 +38,18 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        import openai
+        from openai import AzureOpenAI
     except ImportError:
         print("Error: openai package not installed", file=sys.stderr)
         print("Install with: pip install openai", file=sys.stderr)
         sys.exit(1)
 
-    # Create client and make request
-    client_kwargs = {"api_key": api_key}
-    if base_url:
-        client_kwargs["base_url"] = base_url
-    client = openai.OpenAI(**client_kwargs)
+    # Create Azure client and make request
+    client = AzureOpenAI(
+        api_key=api_key,
+        api_version=args.api_version,
+        azure_endpoint=endpoint,
+    )
 
     messages = []
     if args.system:
@@ -63,7 +66,7 @@ def main() -> None:
         # Extract text from response
         if response.choices and response.choices[0].message.content:
             print(response.choices[0].message.content)
-    except openai.APIError as e:
+    except Exception as e:
         print(f"API Error: {e}", file=sys.stderr)
         sys.exit(1)
 
