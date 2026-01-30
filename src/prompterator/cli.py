@@ -11,6 +11,7 @@ from prompterator.commands.init import init_cmd
 from prompterator.commands.issues import issues_cmd
 from prompterator.commands.status import status_cmd
 from prompterator.commands.test import test_cmd
+from prompterator.commands.tune import tune_cmd
 
 
 @click.group()
@@ -26,6 +27,7 @@ def main() -> None:
     3. evals     - Generate .eval.yaml files from issues
     4. improve   - Generate improved prompts via LLM
     5. test      - Run evals against prompts
+    6. tune      - Run full improve→test loop iteratively
 
     \b
     Utilities:
@@ -46,6 +48,7 @@ main.add_command(improve_cmd)
 main.add_command(test_cmd)
 main.add_command(status_cmd)
 main.add_command(collect_cmd)
+main.add_command(tune_cmd)
 
 
 if __name__ == "__main__":
