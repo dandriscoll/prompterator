@@ -1,5 +1,7 @@
 """Eval execution logic - run evals against prompts."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from prompterator.models.eval import Eval, EvalFile
@@ -66,18 +68,29 @@ def _parse_rubric_response(response: str, criteria: list[str]) -> tuple[bool, fl
 def run_eval(
     eval_spec: Eval,
     prompt_content: str,
-    llm_client: LLMClient,
+    llm_client: LLMClient | None = None,
+    *,
+    script: str | None = None,
+    script_timeout: int = 60,
 ) -> EvalResult:
     """Run a single evaluation against a prompt.
 
     Args:
         eval_spec: The eval specification to run.
         prompt_content: Content of the prompt to evaluate.
-        llm_client: LLM client for running evaluations.
+        llm_client: LLM client for running evaluations (used in llm mode).
+        script: Path to critic script (used in script mode).
+        script_timeout: Timeout for script execution in seconds.
 
     Returns:
         EvalResult with pass/fail and score.
     """
+    # Script mode: delegate entirely to the external script
+    if script is not None:
+        from prompterator.runners.critic_script import run_script_eval
+
+        return run_script_eval(script, eval_spec, prompt_content, timeout=script_timeout)
+
     if eval_spec.type == "rubric" and eval_spec.rubric:
         criteria = eval_spec.rubric.criteria
         eval_prompt = _build_rubric_prompt(prompt_content, criteria)
@@ -133,14 +146,19 @@ REASON: [brief explanation]"""
 def run_all_evals(
     eval_file: EvalFile,
     prompt_path: Path,
-    llm_client: LLMClient,
+    llm_client: LLMClient | None = None,
+    *,
+    script: str | None = None,
+    script_timeout: int = 60,
 ) -> ResultFile:
     """Run all evaluations against a prompt.
 
     Args:
         eval_file: EvalFile containing all eval specs.
         prompt_path: Path to the prompt file to evaluate.
-        llm_client: LLM client for running evaluations.
+        llm_client: LLM client for running evaluations (llm mode).
+        script: Path to critic script (script mode).
+        script_timeout: Timeout for script execution in seconds.
 
     Returns:
         ResultFile with all results and summary.
@@ -150,7 +168,10 @@ def run_all_evals(
 
     results = []
     for eval_spec in eval_file.evals:
-        result = run_eval(eval_spec, prompt_content, llm_client)
+        result = run_eval(
+            eval_spec, prompt_content, llm_client,
+            script=script, script_timeout=script_timeout,
+        )
         results.append(result)
 
     # Calculate summary

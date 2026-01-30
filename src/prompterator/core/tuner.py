@@ -18,7 +18,10 @@ from prompterator.runners.llm import LLMClient
 def _run_evals_on_text(
     prompt_text: str,
     eval_file: EvalFile,
-    critic_llm: LLMClient,
+    critic_llm: LLMClient | None,
+    *,
+    script: str | None = None,
+    script_timeout: int = 60,
 ) -> tuple[list, ResultSummary]:
     """Run evals on prompt text by writing to a temp file.
 
@@ -30,7 +33,10 @@ def _run_evals_on_text(
         tmp_path = Path(f.name)
 
     try:
-        result_file = run_all_evals(eval_file, tmp_path, critic_llm)
+        result_file = run_all_evals(
+            eval_file, tmp_path, critic_llm,
+            script=script, script_timeout=script_timeout,
+        )
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -73,10 +79,13 @@ def run_tuning_loop(
     issue_file: IssueFile,
     eval_file: EvalFile,
     editor_llm: LLMClient,
-    critic_llm: LLMClient,
+    critic_llm: LLMClient | None = None,
     max_iterations: int = 20,
     output_dir: Path | None = None,
     on_iteration: Callable | None = None,
+    *,
+    critic_script: str | None = None,
+    critic_script_timeout: int = 60,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -101,7 +110,8 @@ def run_tuning_loop(
 
     # Run baseline evals
     baseline_results, baseline_summary = _run_evals_on_text(
-        current_text, eval_file, critic_llm
+        current_text, eval_file, critic_llm,
+        script=critic_script, script_timeout=critic_script_timeout,
     )
     previous_results = baseline_results
     previous_score = baseline_summary.overall_score
@@ -118,7 +128,8 @@ def run_tuning_loop(
 
         # Run evals on improved prompt
         new_results, new_summary = _run_evals_on_text(
-            improved_text, eval_file, critic_llm
+            improved_text, eval_file, critic_llm,
+            script=critic_script, script_timeout=critic_script_timeout,
         )
 
         # Compute deltas

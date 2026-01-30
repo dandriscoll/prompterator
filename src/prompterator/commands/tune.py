@@ -107,6 +107,10 @@ def tune_cmd(
         output_dir = base_dir / ".prompterator" / "tune"
 
     # Initialize LLM clients
+    critic_llm = None
+    critic_script = None
+    critic_script_timeout = config.critic.script_timeout
+
     try:
         editor_llm = LLMClient(
             runner=config.editor.runner,
@@ -116,14 +120,19 @@ def tune_cmd(
             endpoint=config.editor.endpoint,
             api_version=config.editor.api_version,
         )
-        critic_llm = LLMClient(
-            runner=config.critic.runner,
-            temperature=config.critic.temperature,
-            max_tokens=config.critic.max_tokens,
-            model=config.critic.model,
-            endpoint=config.critic.endpoint,
-            api_version=config.critic.api_version,
-        )
+        if config.critic.mode == "script":
+            critic_script = config.critic.script
+            click.echo(f"Critic mode: script ({critic_script})")
+        else:
+            click.echo("Critic mode: llm")
+            critic_llm = LLMClient(
+                runner=config.critic.runner,
+                temperature=config.critic.temperature,
+                max_tokens=config.critic.max_tokens,
+                model=config.critic.model,
+                endpoint=config.critic.endpoint,
+                api_version=config.critic.api_version,
+            )
     except LLMError as e:
         click.echo(f"LLM error: {e}", err=True)
         raise SystemExit(1)
@@ -150,6 +159,8 @@ def tune_cmd(
             max_iterations=max_iterations,
             output_dir=output_dir,
             on_iteration=on_iteration,
+            critic_script=critic_script,
+            critic_script_timeout=critic_script_timeout,
         )
     except LLMError as e:
         click.echo(f"LLM error during tuning: {e}", err=True)

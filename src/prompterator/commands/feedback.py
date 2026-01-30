@@ -70,6 +70,12 @@ def parse_mb_file(path: Path) -> Feedback:
         if not feedback_text:
             continue
 
+        # Use markback's source attribute for prompt_ref if available
+        if not prompt_ref and hasattr(record, "source") and record.source:
+            source_val = getattr(record.source, "value", None) or str(record.source)
+            if source_val:
+                prompt_ref = source_val
+
         # Check for ref= in the feedback
         if "ref=" in feedback_text:
             # Extract ref and remove from feedback
@@ -84,12 +90,22 @@ def parse_mb_file(path: Path) -> Feedback:
 
         # Parse the feedback entries
         parsed = _parse_feedback_string(feedback_text)
-        for category, value, details in parsed:
+        if parsed:
+            for category, value, details in parsed:
+                entries.append(
+                    FeedbackEntry(
+                        category=category,
+                        value=value,
+                        details=details,
+                    )
+                )
+        elif feedback_text.strip():
+            # Plain text feedback without category=value format
             entries.append(
                 FeedbackEntry(
-                    category=category,
-                    value=value,
-                    details=details,
+                    category="general",
+                    value=feedback_text.strip(),
+                    details=None,
                 )
             )
 

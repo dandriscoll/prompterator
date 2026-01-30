@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DirectoriesConfig(BaseModel):
@@ -52,9 +52,52 @@ class EditorConfig(LLMRoleConfig):
 
 
 class CriticConfig(LLMRoleConfig):
-    """Critic LLM configuration - runs evals."""
+    """Critic configuration - runs evals.
 
+    Supports two modes:
+    - "llm" (default): Uses an LLM to evaluate prompts via rubric/assertion.
+    - "script": Runs an external script that receives eval input as YAML on stdin
+      and produces eval results as YAML on stdout.
+
+    Script mode input (YAML on stdin):
+        prompt: <prompt text>
+        eval:
+            id: <eval id>
+            type: rubric | assertion
+            rubric:                    # present if type=rubric
+                criteria: [...]
+                scoring: all_required | any_required | weighted
+                weights: [...]         # optional
+            assertion: <text>          # present if type=assertion
+            description: <text>        # optional
+
+    Script mode output (YAML on stdout):
+        eval_id: <eval id>
+        passed: true | false
+        score: <0.0-1.0>
+        details: <optional string>
+    """
+
+    mode: Literal["llm", "script"] = Field(
+        default="llm",
+        description="Critic mode: 'llm' for LLM-based evaluation, 'script' for external script",
+    )
+    script: str | None = Field(
+        default=None,
+        description="Path to critic script executable (required when mode='script')",
+    )
+    script_timeout: int = Field(
+        default=60,
+        gt=0,
+        description="Timeout in seconds for script execution",
+    )
     temperature: float = Field(default=0.3, ge=0.0, le=2.0, description="Sampling temperature")
+
+    @model_validator(mode="after")
+    def _validate_script_mode(self) -> "CriticConfig":
+        if self.mode == "script" and not self.script:
+            raise ValueError("critic.script is required when mode='script'")
+        return self
 
 
 class FeedbackConfig(BaseModel):
@@ -139,7 +182,12 @@ class Config(BaseModel):
             },
             "author": self._role_to_dict(self.author),
             "editor": self._role_to_dict(self.editor),
-            "critic": self._role_to_dict(self.critic),
+            "critic": {
+                **self._role_to_dict(self.critic),
+                "mode": self.critic.mode,
+                **({"script": self.critic.script} if self.critic.script else {}),
+                **({"script_timeout": self.critic.script_timeout} if self.critic.script_timeout != 60 else {}),
+            },
             "feedback": {
                 "categories": self.feedback.categories,
                 "min_occurrences": self.feedback.min_occurrences,

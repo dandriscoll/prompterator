@@ -7,6 +7,7 @@ import click
 from prompterator.config.loader import get_config_base_dir, load_config
 from prompterator.core.eval_runner import run_all_evals, save_result_file
 from prompterator.core.eval_spec import load_eval_file
+from prompterator.runners.critic_script import CriticScriptError
 from prompterator.runners.llm import LLMClient, LLMError
 
 
@@ -67,23 +68,38 @@ def test_cmd(
     click.echo(f"Evals: {len(eval_file.evals)} from {evals_path.name}")
     click.echo()
 
-    # Initialize Critic LLM client
-    try:
-        llm = LLMClient(
-            runner=config.critic.runner,
-            temperature=config.critic.temperature,
-            max_tokens=config.critic.max_tokens,
-        )
-    except LLMError as e:
-        click.echo(f"Critic LLM error: {e}", err=True)
-        raise SystemExit(1)
+    # Initialize critic (LLM or script mode)
+    llm = None
+    script = None
+    script_timeout = config.critic.script_timeout
+
+    if config.critic.mode == "script":
+        script = config.critic.script
+        click.echo(f"Critic mode: script ({script})")
+    else:
+        click.echo("Critic mode: llm")
+        try:
+            llm = LLMClient(
+                runner=config.critic.runner,
+                temperature=config.critic.temperature,
+                max_tokens=config.critic.max_tokens,
+            )
+        except LLMError as e:
+            click.echo(f"Critic LLM error: {e}", err=True)
+            raise SystemExit(1)
 
     # Run evaluations
     click.echo("Running evaluations...")
     try:
-        result_file = run_all_evals(eval_file, prompt, llm)
+        result_file = run_all_evals(
+            eval_file, prompt, llm,
+            script=script, script_timeout=script_timeout,
+        )
     except LLMError as e:
         click.echo(f"LLM error during evaluation: {e}", err=True)
+        raise SystemExit(1)
+    except CriticScriptError as e:
+        click.echo(f"Critic script error: {e}", err=True)
         raise SystemExit(1)
 
     # Display results
