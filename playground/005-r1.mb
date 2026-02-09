@@ -1,0 +1,25 @@
+@source outputs/005-r1.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< format=bad; note=preamble sentence at top
+
+---
+
+@source outputs/005-r1.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< accuracy=low; note=changed from flat checkboxes to priority groups, same structural rewrite as every other output
+
+---
+
+@source outputs/005-r1.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< clarity=medium; note=input was extremely vague so model couldnt really make it specific, garbage in garbage out
+
+---
+
+@source outputs/005-r1.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< format=bad; note=chatbot offer at the end to break into subtasks

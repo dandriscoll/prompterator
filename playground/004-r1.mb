@@ -1,0 +1,25 @@
+@source outputs/004-r1.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< format=bad; note=three lines of preamble that would show up in the rendered to-do list
+
+---
+
+@source outputs/004-r1.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< accuracy=low; note=original was a flat list with inline notes and model imposed an entirely new priority taxonomy with CRITICAL HIGH MEDIUM LOW headings
+
+---
+
+@source outputs/004-r1.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< format=poor; note=changed from markdown dashes to bullet point characters
+
+---
+
+@source outputs/004-r1.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< format=bad; note=chatbot offer to convert into weekly action plan at the end

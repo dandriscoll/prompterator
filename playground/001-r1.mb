@@ -1,0 +1,25 @@
+@source outputs/001-r1.out.md
+@prior improve-todo.prompt.md
+@prior 001.todoosy.md
+<<< format=bad; note=opens with a conversational paragraph that pollutes the to-do list output
+
+---
+
+@source outputs/001-r1.out.md
+@prior improve-todo.prompt.md
+@prior 001.todoosy.md
+<<< accuracy=low; note=replaced markdown checkboxes with priority-grouped sections — structural rewrite not requested
+
+---
+
+@source outputs/001-r1.out.md
+@prior improve-todo.prompt.md
+@prior 001.todoosy.md
+<<< clarity=good; note=individual item rewrites are actually clearer than the originals
+
+---
+
+@source outputs/001-r1.out.md
+@prior improve-todo.prompt.md
+@prior 001.todoosy.md
+<<< format=bad; note=ends with a chatbot offer to convert into weekly plan

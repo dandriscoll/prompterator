@@ -1,0 +1,25 @@
+@source outputs/002-r1.out.md
+@prior improve-todo.prompt.md
+@prior 002.todoosy.md
+<<< format=bad; note=conversational intro sentence before the actual list
+
+---
+
+@source outputs/002-r1.out.md
+@prior improve-todo.prompt.md
+@prior 002.todoosy.md
+<<< accuracy=low; note=original was a flat dump with no groupings and model invented a priority structure from scratch
+
+---
+
+@source outputs/002-r1.out.md
+@prior improve-todo.prompt.md
+@prior 002.todoosy.md
+<<< format=poor; note=changed from plain dashes to bullet point characters
+
+---
+
+@source outputs/002-r1.out.md
+@prior improve-todo.prompt.md
+@prior 002.todoosy.md
+<<< format=bad; note=chatbot sign-off offering to make a daily schedule

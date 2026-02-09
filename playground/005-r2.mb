@@ -1,0 +1,18 @@
+@source outputs/005-r2.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< format=bad; note=conversational intro present
+
+---
+
+@source outputs/005-r2.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< accuracy=low; note=structure changed from checkboxes to grouped bullets
+
+---
+
+@source outputs/005-r2.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< clarity=medium; note=items are slightly more specific than the originals which were single words

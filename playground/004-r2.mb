@@ -1,0 +1,18 @@
+@source outputs/004-r2.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< format=bad; note=conversational preamble
+
+---
+
+@source outputs/004-r2.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< completeness=low; note=dropped the inline human context from original items like which is insane and pinged them twice
+
+---
+
+@source outputs/004-r2.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< accuracy=low; note=structure was flattened and re-sorted into priority groups, discarding sub-items and freeform notes that were part of the input
