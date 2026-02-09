@@ -1,0 +1,63 @@
+version: "1.0"
+
+directories:
+  prompts: "."
+  feedback: "."
+  issues: ".prompterator/issues"
+  evals: ".prompterator/evals"
+  results: ".prompterator/results"
+
+# ── LLM Connection Stacks ──────────────────────────────────────────
+# ADMIN: Replace the placeholder values below with real LLM endpoints
+# before proceeding past Checkpoint 1.
+#
+# Option A — Anthropic (requires ANTHROPIC_API_KEY env var):
+#   runner: "anthropic"
+#   model: "claude-sonnet-4-20250514"
+#
+# Option B — OpenAI (requires OPENAI_API_KEY env var):
+#   runner: "openai"
+#   model: "gpt-4o"
+#
+# Option C — Azure OpenAI (requires AZURE_OPENAI_API_KEY + endpoint):
+#   runner: "azure-openai"
+#   model: "<your-deployment-name>"
+#   endpoint: "https://<resource>.openai.azure.com/"
+#   api_version: "2024-02-01"
+
+stacks:
+  default:
+    runner: "anthropic"
+    model: "PLACEHOLDER — set a real model before running"
+
+author:
+  stack: "default"
+  temperature: 0.7
+  max_tokens: 4096
+
+editor:
+  stack: "default"
+  temperature: 0.7
+  max_tokens: 4096
+
+critic:
+  stack: "default"
+  temperature: 0.3
+  max_tokens: 4096
+  mode: "llm"
+
+feedback:
+  categories:
+    - clarity
+    - completeness
+    - accuracy
+    - tone
+    - format
+  min_occurrences: 1
+
+naming:
+  executable: "naming"
+  timeout: 30
+
+workflow:
+  git_mode: false
