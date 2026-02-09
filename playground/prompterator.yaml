@@ -27,8 +27,9 @@ directories:
 
 stacks:
   default:
-    runner: "anthropic"
-    model: "PLACEHOLDER — set a real model before running"
+    runner: "./llm-runner"
+    model: "gpt-5.1-chat"
+    api_version: "2024-02-01"
 
 author:
   stack: "default"
