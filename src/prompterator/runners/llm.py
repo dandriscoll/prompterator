@@ -1,5 +1,6 @@
 """Subprocess wrapper for LLM runner scripts."""
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -140,5 +141,33 @@ class LLMClient:
             raise LLMError(f"LLM generation failed: {error_msg}")
         except subprocess.TimeoutExpired:
             raise LLMError(f"LLM generation timed out after {timeout}s")
+        except FileNotFoundError:
+            raise LLMError(f"LLM runner not found: {self._executable}")
+
+    def descriptor(self, timeout: int = 30) -> dict:
+        """Get the Boutiques descriptor from the runner.
+
+        Returns:
+            Parsed JSON descriptor dict.
+
+        Raises:
+            LLMError: If the runner fails or returns invalid JSON.
+        """
+        try:
+            result = subprocess.run(
+                [self._executable, "--descriptor"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=True,
+            )
+            return json.loads(result.stdout)
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr or e.stdout or "Unknown error"
+            raise LLMError(f"Failed to get descriptor: {error_msg}")
+        except subprocess.TimeoutExpired:
+            raise LLMError(f"Descriptor request timed out after {timeout}s")
+        except json.JSONDecodeError as e:
+            raise LLMError(f"Invalid JSON from descriptor: {e}")
         except FileNotFoundError:
             raise LLMError(f"LLM runner not found: {self._executable}")

@@ -112,27 +112,13 @@ def tune_cmd(
     critic_script_timeout = config.critic.script_timeout
 
     try:
-        editor_llm = LLMClient(
-            runner=config.editor.runner,
-            temperature=config.editor.temperature,
-            max_tokens=config.editor.max_tokens,
-            model=config.editor.model,
-            endpoint=config.editor.endpoint,
-            api_version=config.editor.api_version,
-        )
+        editor_llm = LLMClient(**config.resolve_role("editor"))
         if config.critic.mode == "script":
             critic_script = config.critic.script
             click.echo(f"Critic mode: script ({critic_script})")
         else:
             click.echo("Critic mode: llm")
-            critic_llm = LLMClient(
-                runner=config.critic.runner,
-                temperature=config.critic.temperature,
-                max_tokens=config.critic.max_tokens,
-                model=config.critic.model,
-                endpoint=config.critic.endpoint,
-                api_version=config.critic.api_version,
-            )
+            critic_llm = LLMClient(**config.resolve_role("critic"))
     except LLMError as e:
         click.echo(f"LLM error: {e}", err=True)
         raise SystemExit(1)

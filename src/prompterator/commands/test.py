@@ -79,11 +79,7 @@ def test_cmd(
     else:
         click.echo("Critic mode: llm")
         try:
-            llm = LLMClient(
-                runner=config.critic.runner,
-                temperature=config.critic.temperature,
-                max_tokens=config.critic.max_tokens,
-            )
+            llm = LLMClient(**config.resolve_role("critic"))
         except LLMError as e:
             click.echo(f"Critic LLM error: {e}", err=True)
             raise SystemExit(1)

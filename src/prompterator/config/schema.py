@@ -16,8 +16,8 @@ class DirectoriesConfig(BaseModel):
     results: str = Field(default=".prompterator/results", description="Directory for result files")
 
 
-class LLMRoleConfig(BaseModel):
-    """Base LLM configuration for a role."""
+class StackConfig(BaseModel):
+    """Named LLM connection stack."""
 
     runner: str = Field(
         default="anthropic",
@@ -34,6 +34,15 @@ class LLMRoleConfig(BaseModel):
     api_version: str | None = Field(
         default=None,
         description="API version (for Azure OpenAI)",
+    )
+
+
+class LLMRoleConfig(BaseModel):
+    """Base LLM configuration for a role."""
+
+    stack: str = Field(
+        default="default",
+        description="Name of the stack to use for LLM connection settings",
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
     max_tokens: int = Field(default=4096, gt=0, description="Maximum tokens to generate")
@@ -138,12 +147,44 @@ class Config(BaseModel):
 
     version: str = Field(default="1.0", description="Config file version")
     directories: DirectoriesConfig = Field(default_factory=DirectoriesConfig)
+    stacks: dict[str, StackConfig] = Field(
+        default_factory=lambda: {"default": StackConfig()},
+        description="Named LLM connection stacks",
+    )
     author: AuthorConfig = Field(default_factory=AuthorConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     critic: CriticConfig = Field(default_factory=CriticConfig)
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
     naming: NamingConfig = Field(default_factory=NamingConfig)
     workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
+
+    @model_validator(mode="after")
+    def _validate_stack_references(self) -> "Config":
+        for role_name in ("author", "editor", "critic"):
+            role = getattr(self, role_name)
+            if role.stack not in self.stacks:
+                raise ValueError(
+                    f"{role_name}.stack references unknown stack '{role.stack}'; "
+                    f"available stacks: {', '.join(sorted(self.stacks))}"
+                )
+        return self
+
+    def resolve_role(self, name: str) -> dict:
+        """Merge stack fields + role fields into a flat dict.
+
+        Returns dict with keys: runner, model, endpoint, api_version,
+        temperature, max_tokens.
+        """
+        role: LLMRoleConfig = getattr(self, name)
+        stack = self.stacks[role.stack]
+        return {
+            "runner": stack.runner,
+            "model": stack.model,
+            "endpoint": stack.endpoint,
+            "api_version": stack.api_version,
+            "temperature": role.temperature,
+            "max_tokens": role.max_tokens,
+        }
 
     def get_dir(self, name: Literal["prompts", "feedback", "issues", "evals", "results"], base: Path) -> Path:
         """Get resolved directory path."""
@@ -155,18 +196,24 @@ class Config(BaseModel):
 
     @staticmethod
     def _role_to_dict(role: LLMRoleConfig) -> dict:
-        """Convert role config to dict, omitting None values."""
-        d = {
-            "runner": role.runner,
+        """Convert role config to dict for YAML serialization."""
+        d: dict = {
+            "stack": role.stack,
             "temperature": role.temperature,
             "max_tokens": role.max_tokens,
         }
-        if role.model is not None:
-            d["model"] = role.model
-        if role.endpoint is not None:
-            d["endpoint"] = role.endpoint
-        if role.api_version is not None:
-            d["api_version"] = role.api_version
+        return d
+
+    @staticmethod
+    def _stack_to_dict(stack: StackConfig) -> dict:
+        """Convert stack config to dict, omitting None values."""
+        d: dict = {"runner": stack.runner}
+        if stack.model is not None:
+            d["model"] = stack.model
+        if stack.endpoint is not None:
+            d["endpoint"] = stack.endpoint
+        if stack.api_version is not None:
+            d["api_version"] = stack.api_version
         return d
 
     def to_yaml_dict(self) -> dict:
@@ -179,6 +226,10 @@ class Config(BaseModel):
                 "issues": self.directories.issues,
                 "evals": self.directories.evals,
                 "results": self.directories.results,
+            },
+            "stacks": {
+                name: self._stack_to_dict(stack)
+                for name, stack in self.stacks.items()
             },
             "author": self._role_to_dict(self.author),
             "editor": self._role_to_dict(self.editor),

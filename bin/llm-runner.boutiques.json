@@ -1,0 +1,98 @@
+{
+  "name": "llm-runner",
+  "description": "LLM runner interface for prompterator. Reads a user prompt from stdin and writes the LLM response to stdout.",
+  "tool-version": "0.1.0",
+  "schema-version": "0.5",
+  "command-line": "llm-runner [--system SYSTEM] [--temperature TEMPERATURE] [--max-tokens MAX_TOKENS] [--model MODEL] [--endpoint ENDPOINT] [--api-version API_VERSION] [--descriptor]",
+  "inputs": [
+    {
+      "id": "system",
+      "name": "System prompt",
+      "type": "String",
+      "optional": true,
+      "command-line-flag": "--system",
+      "description": "System prompt to prepend to the conversation."
+    },
+    {
+      "id": "temperature",
+      "name": "Temperature",
+      "type": "Number",
+      "optional": true,
+      "default-value": 0.7,
+      "command-line-flag": "--temperature",
+      "description": "Sampling temperature for generation."
+    },
+    {
+      "id": "max_tokens",
+      "name": "Max tokens",
+      "type": "Number",
+      "integer": true,
+      "optional": true,
+      "default-value": 4096,
+      "command-line-flag": "--max-tokens",
+      "description": "Maximum number of tokens to generate."
+    },
+    {
+      "id": "model",
+      "name": "Model",
+      "type": "String",
+      "optional": true,
+      "command-line-flag": "--model",
+      "description": "Model name or deployment ID."
+    },
+    {
+      "id": "endpoint",
+      "name": "Endpoint",
+      "type": "String",
+      "optional": true,
+      "command-line-flag": "--endpoint",
+      "description": "API base URL."
+    },
+    {
+      "id": "api_version",
+      "name": "API version",
+      "type": "String",
+      "optional": true,
+      "command-line-flag": "--api-version",
+      "description": "API version string (used by Azure OpenAI)."
+    },
+    {
+      "id": "descriptor",
+      "name": "Descriptor",
+      "type": "Flag",
+      "optional": true,
+      "command-line-flag": "--descriptor",
+      "description": "Print the Boutiques descriptor JSON and exit."
+    }
+  ],
+  "output-files": [
+    {
+      "id": "response",
+      "name": "LLM response",
+      "path-template": "-",
+      "description": "LLM response text written to stdout (or JSON descriptor when --descriptor is used)."
+    }
+  ],
+  "error-codes": [
+    {
+      "code": 0,
+      "description": "Success."
+    },
+    {
+      "code": 1,
+      "description": "Error (missing API key, invalid input, API failure, etc.)."
+    }
+  ],
+  "custom": {
+    "prompterator": {
+      "interface": "stdin-stdout",
+      "stdin": "User prompt text",
+      "stdout": "LLM response text (plain) or Boutiques JSON (with --descriptor)",
+      "environment-variables": {
+        "anthropic": ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"],
+        "openai": ["OPENAI_API_KEY", "OPENAI_BASE_URL"],
+        "azure-openai": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"]
+      }
+    }
+  }
+}

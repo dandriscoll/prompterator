@@ -75,11 +75,7 @@ def improve_cmd(
 
     # Initialize Editor LLM client
     try:
-        llm = LLMClient(
-            runner=config.editor.runner,
-            temperature=config.editor.temperature,
-            max_tokens=config.editor.max_tokens,
-        )
+        llm = LLMClient(**config.resolve_role("editor"))
     except LLMError as e:
         click.echo(f"Editor LLM error: {e}", err=True)
         raise SystemExit(1)

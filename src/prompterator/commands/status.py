@@ -118,6 +118,7 @@ def status_cmd(verbose: bool) -> None:
     # LLM Role Configurations
     click.echo()
     click.echo("LLM Roles:")
-    click.echo(f"  Author: {config.author.runner} (temp={config.author.temperature})")
-    click.echo(f"  Editor: {config.editor.runner} (temp={config.editor.temperature})")
-    click.echo(f"  Critic: {config.critic.runner} (temp={config.critic.temperature})")
+    for role_name in ("author", "editor", "critic"):
+        resolved = config.resolve_role(role_name)
+        role = getattr(config, role_name)
+        click.echo(f"  {role_name.title()}: stack={role.stack}, runner={resolved['runner']} (temp={resolved['temperature']})")
