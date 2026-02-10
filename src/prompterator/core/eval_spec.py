@@ -42,6 +42,32 @@ def _generate_eval_id(prompt_ref: str, category: str, index: int) -> str:
     return f"eval-{base}-{category}-{index:02d}"
 
 
+def _criteria_from_evidence(issue) -> list[str]:
+    """Extract specific eval criteria from issue evidence details.
+
+    Turns feedback like 'note=opens with conversational paragraph' into
+    a testable criterion like 'Prompt instructs against opening with
+    conversational paragraph'.
+    """
+    criteria = []
+    seen = set()
+
+    for ev in issue.evidence:
+        feedback = ev.feedback
+        # Extract the note/detail text
+        detail = None
+        for marker in ("; note=", "; needs=", "; detail="):
+            if marker in feedback:
+                detail = feedback.split(marker, 1)[1]
+                break
+
+        if detail and detail not in seen:
+            seen.add(detail)
+            criteria.append(f"Prompt addresses: {detail}")
+
+    return criteria
+
+
 def generate_evals_from_issues(issue_file: IssueFile) -> EvalFile:
     """Generate evaluation specifications from issues.
 
@@ -57,8 +83,13 @@ def generate_evals_from_issues(issue_file: IssueFile) -> EvalFile:
     for issue in issue_file.issues:
         category = issue.category.lower()
 
-        # Get criteria for this category
-        criteria = CATEGORY_CRITERIA.get(category, [f"Addresses {category} concerns"])
+        # Prefer feedback-specific criteria derived from evidence details.
+        # Fall back to generic category criteria when no details are available.
+        specific_criteria = _criteria_from_evidence(issue)
+        if specific_criteria:
+            criteria = specific_criteria
+        else:
+            criteria = CATEGORY_CRITERIA.get(category, [f"Addresses {category} concerns"])
 
         # High severity issues require all criteria
         # Medium/low can pass with any

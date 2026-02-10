@@ -49,12 +49,20 @@ def consolidate_feedback(
     # Group evidence by category
     category_evidence: dict[str, list[IssueEvidence]] = defaultdict(list)
     category_values: dict[str, list[str]] = defaultdict(list)
+    category_details: dict[str, list[str]] = defaultdict(list)
+
+    # Values that indicate positive/acceptable feedback (not issues)
+    positive_values = {"good", "great", "fine", "acceptable", "ok", "excellent"}
 
     for feedback in feedback_list:
         for entry in feedback.entries:
             # Normalize category name
             cat = entry.category.lower()
             if cat not in [c.lower() for c in categories]:
+                continue
+
+            # Skip positive feedback — these are not issues to fix
+            if entry.value.lower() in positive_values:
                 continue
 
             evidence = IssueEvidence(
@@ -64,6 +72,17 @@ def consolidate_feedback(
             )
             category_evidence[cat].append(evidence)
             category_values[cat].append(entry.value)
+
+            # Collect actionable detail text for the summary
+            if entry.details:
+                # Extract the text after 'note=' or 'needs=' prefix
+                detail_text = entry.details
+                for prefix in ("note=", "needs=", "detail="):
+                    if detail_text.startswith(prefix):
+                        detail_text = detail_text[len(prefix):]
+                        break
+                if detail_text not in category_details[cat]:
+                    category_details[cat].append(detail_text)
 
     # Create issues for categories meeting threshold
     issues = []
@@ -76,15 +95,23 @@ def consolidate_feedback(
         if len(evidence_list) < min_occurrences:
             continue
 
-        # Generate summary from values
-        values = category_values.get(cat_lower, [])
-        unique_values = list(set(values))
-        if len(unique_values) == 1:
-            summary = f"{cat.capitalize()} issue: {unique_values[0]}"
+        # Generate summary incorporating specific feedback details
+        details = category_details.get(cat_lower, [])
+        if details:
+            # Use the actual feedback notes for a rich, actionable summary
+            summary = f"{cat.capitalize()}: " + "; ".join(details[:5])
+            if len(details) > 5:
+                summary += f" (+{len(details) - 5} more)"
         else:
-            summary = f"{cat.capitalize()} issues noted: {', '.join(unique_values[:3])}"
-            if len(unique_values) > 3:
-                summary += f" (+{len(unique_values) - 3} more)"
+            # Fall back to values if no details available
+            values = category_values.get(cat_lower, [])
+            unique_values = list(set(values))
+            if len(unique_values) == 1:
+                summary = f"{cat.capitalize()} issue: {unique_values[0]}"
+            else:
+                summary = f"{cat.capitalize()} issues noted: {', '.join(unique_values[:3])}"
+                if len(unique_values) > 3:
+                    summary += f" (+{len(unique_values) - 3} more)"
 
         issue = Issue(
             id=_generate_issue_id(prompt_ref, cat_lower, issue_index),

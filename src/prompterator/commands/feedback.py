@@ -70,7 +70,18 @@ def parse_mb_file(path: Path) -> Feedback:
         if not feedback_text:
             continue
 
-        # Use markback's source attribute for prompt_ref if available
+        # Prefer @prior prompt files (.prompt.txt/.prompt.md) for prompt_ref,
+        # since @source points to the output file, not the prompt being evaluated.
+        if not prompt_ref and hasattr(record, "priors") and record.priors:
+            for prior in record.priors:
+                prior_val = getattr(prior, "value", None) or str(prior)
+                if prior_val and (
+                    prior_val.endswith(".prompt.txt") or prior_val.endswith(".prompt.md")
+                ):
+                    prompt_ref = prior_val
+                    break
+
+        # Fall back to @source if no prompt prior was found
         if not prompt_ref and hasattr(record, "source") and record.source:
             source_val = getattr(record.source, "value", None) or str(record.source)
             if source_val:
