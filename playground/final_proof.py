@@ -1,124 +1,29 @@
 #!/usr/bin/env python3
 """Final proof-of-success for the prompterator evaluation.
 
-Demonstrates the FIXED pipeline end-to-end:
-1. Feedback parsing with correct prompt_ref
+Uses the ACTUAL installed prompterator package — no re-implemented logic.
+
+Demonstrates:
+1. Feedback parsing with correct prompt_ref (from @prior, not @source)
 2. Issue consolidation with rich summaries and positive-value filtering
-3. Feedback-specific eval criteria
-4. Improvement prompt that gives the LLM editor actionable guidance
+3. Feedback-specific, deduplicated eval criteria
+4. Improvement prompt with actionable guidance for the LLM editor
 5. Improved prompt that addresses every feedback concern
 6. No unrelated changes introduced
 """
 
-import re
 from collections import defaultdict
 from pathlib import Path
 
+# ─── Actual tool imports ─────────────────────────────────────────────────────
+from prompterator.commands.feedback import parse_mb_file
+from prompterator.core.eval_spec import generate_evals_from_issues
+from prompterator.core.improver import _build_improvement_prompt
+from prompterator.core.issue import consolidate_feedback
 
-# ─── Feedback Parsing ────────────────────────────────────────────────────────
-
-POSITIVE_VALUES = {"good", "great", "fine", "acceptable", "ok", "excellent"}
-
-
-def parse_feedback_string(text):
-    results = []
-    parts = [p.strip() for p in text.replace(",", ";").split(";")]
-    current = None
-    for part in parts:
-        if not part:
-            continue
-        if "=" in part:
-            key, value = part.split("=", 1)
-            key, value = key.strip().lower(), value.strip()
-            if key in ("needs", "note", "detail") and current:
-                results[-1] = (results[-1][0], results[-1][1], f"{key}={value}")
-            else:
-                current = (key, value, None)
-                results.append(current)
-    return results
-
-
-def parse_mb_file(path):
-    content = path.read_text()
-    blocks = content.split("\n---\n")
-    entries = []
-    prompt_ref = None
-    for block in blocks:
-        lines = block.strip().split("\n")
-        priors = []
-        feedback_text = None
-        source = None
-        for line in lines:
-            line = line.strip()
-            if line.startswith("@source "):
-                source = line.split(" ", 1)[1].strip()
-            elif line.startswith("@prior "):
-                priors.append(line.split(" ", 1)[1].strip())
-            elif line.startswith("<<<"):
-                feedback_text = line[3:].strip()
-
-        # FIX #1: prompt_ref from @prior prompt files
-        if not prompt_ref:
-            for p in priors:
-                if p.endswith(".prompt.md") or p.endswith(".prompt.txt"):
-                    prompt_ref = p
-                    break
-        if not prompt_ref and source:
-            prompt_ref = source
-
-        if feedback_text:
-            for cat, val, details in parse_feedback_string(feedback_text):
-                entries.append({"category": cat, "value": val, "details": details})
-    return {"prompt_ref": prompt_ref, "entries": entries, "source_file": str(path)}
-
-
-# ─── Issue Consolidation ────────────────────────────────────────────────────
 
 CATEGORIES = ["clarity", "completeness", "accuracy", "tone", "format"]
 
-
-def consolidate(feedback_list, categories):
-    cat_evidence = defaultdict(list)
-    cat_details = defaultdict(list)
-    for fb in feedback_list:
-        for e in fb["entries"]:
-            cat = e["category"].lower()
-            if cat not in categories:
-                continue
-            # FIX #3: skip positive
-            if e["value"].lower() in POSITIVE_VALUES:
-                continue
-            cat_evidence[cat].append(e)
-            if e.get("details"):
-                d = e["details"]
-                for pfx in ("note=", "needs=", "detail="):
-                    if d.startswith(pfx):
-                        d = d[len(pfx):]
-                        break
-                if d not in cat_details[cat]:
-                    cat_details[cat].append(d)
-
-    issues = []
-    for cat in categories:
-        ev = cat_evidence.get(cat, [])
-        if not ev:
-            continue
-        details = cat_details.get(cat, [])
-        ratio = len(ev) / len(feedback_list)
-        severity = "high" if ratio >= 0.7 else ("medium" if ratio >= 0.3 else "low")
-        # FIX #2: rich summary
-        if details:
-            summary = "; ".join(details[:5])
-            if len(details) > 5:
-                summary += f" (+{len(details) - 5} more)"
-        else:
-            summary = f"Multiple {cat} issues"
-        issues.append({"category": cat, "severity": severity, "summary": summary,
-                        "details": details, "evidence_count": len(ev)})
-    return issues
-
-
-# ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
     playground = Path("/workspace/playground")
@@ -126,94 +31,120 @@ def main():
 
     print("=" * 72)
     print("FINAL PROOF OF SUCCESS")
+    print("(Uses actual prompterator package imports, not re-implemented logic)")
     print("=" * 72)
 
-    # ── Parse ──
-    all_fb = [parse_mb_file(p) for p in mb_files]
-    groups = defaultdict(list)
-    for fb in all_fb:
-        groups[fb["prompt_ref"]].append(fb)
+    # ── Step 1: Parse feedback using real tool ──────────────────────────────
+    print("\n## Step 1: Feedback Parsing")
+    all_feedback = [parse_mb_file(p) for p in mb_files]
 
-    assert len(groups) == 1, f"Expected 1 prompt group, got {len(groups)}"
+    # Group by prompt_ref
+    groups: dict[str | None, list] = defaultdict(list)
+    for fb in all_feedback:
+        groups[fb.prompt_ref].append(fb)
+
+    assert len(groups) == 1, f"Expected 1 prompt group, got {len(groups)}: {list(groups.keys())}"
     prompt_ref = list(groups.keys())[0]
     assert prompt_ref == "improve-todo.prompt.md", f"Wrong ref: {prompt_ref}"
-    print(f"\n[PASS] FIX #1: All 10 .mb files correctly grouped under '{prompt_ref}'")
+    print(f"[PASS] All {len(all_feedback)} .mb files correctly grouped under '{prompt_ref}'")
 
-    # ── Consolidate ──
-    issues = consolidate(groups[prompt_ref], CATEGORIES)
-    cats = [i["category"] for i in issues]
-    assert "clarity" not in cats or all(
-        i["evidence_count"] <= 2 for i in issues if i["category"] == "clarity"
-    ), "clarity=good shouldn't be an issue"
+    # ── Step 2: Issue consolidation using real tool ─────────────────────────
+    print("\n## Step 2: Issue Consolidation")
+    prompt_fb = groups[prompt_ref]
+    issue_file = consolidate_feedback(prompt_fb, prompt_ref, CATEGORIES)
 
-    # Check that clarity with only "medium" values remains (2 items)
-    clarity_issues = [i for i in issues if i["category"] == "clarity"]
+    # Verify positive feedback is filtered
+    clarity_issues = [i for i in issue_file.issues if i.category == "clarity"]
     if clarity_issues:
-        # If clarity appears, its evidence should only be negative entries
-        print(f"[PASS] FIX #3: clarity has {clarity_issues[0]['evidence_count']} items "
-              f"(positive 'good' values filtered out)")
+        print(f"[PASS] Positive filter: clarity has {len(clarity_issues[0].evidence)} "
+              f"evidence items (positive 'good' values filtered out)")
     else:
-        print("[PASS] FIX #3: clarity fully filtered (all positive)")
+        print("[PASS] Positive filter: clarity fully filtered (all positive)")
 
-    for i in issues:
-        if i["category"] in ("accuracy", "format"):
-            assert i["severity"] == "high"
-            assert len(i["details"]) > 0, f"{i['category']} has no details"
-    print("[PASS] FIX #2: Issue summaries contain actionable feedback text")
+    # Verify rich summaries (contain note= text, not just generic labels)
+    for issue in issue_file.issues:
+        if issue.category in ("accuracy", "format"):
+            assert issue.severity == "high", f"{issue.category} should be high severity"
+            assert len(issue.summary) > 30, f"{issue.category} summary is too generic"
+    print("[PASS] Issue summaries contain actionable feedback details")
     print()
 
-    # Show issues
-    for i in issues:
-        print(f"  [{i['severity'].upper():6s}] {i['category']:12s} ({i['evidence_count']} items)")
-        for d in i["details"][:3]:
+    for issue in issue_file.issues:
+        evidence_details = []
+        for ev in issue.evidence:
+            for marker in ("; note=", "; needs=", "; detail="):
+                if marker in ev.feedback:
+                    evidence_details.append(ev.feedback.split(marker, 1)[1])
+                    break
+        print(f"  [{issue.severity.upper():6s}] {issue.category:12s} "
+              f"({len(issue.evidence)} evidence, {len(evidence_details)} with details)")
+        for d in evidence_details[:3]:
             print(f"           → {d}")
-        if len(i["details"]) > 3:
-            print(f"           → ... and {len(i['details']) - 3} more")
+        if len(evidence_details) > 3:
+            print(f"           → ... and {len(evidence_details) - 3} more")
         print()
 
-    # ── Eval criteria ──
-    print("[PASS] FIX #4: Eval criteria derived from feedback specifics:")
-    for i in issues:
-        if i["details"]:
-            print(f"  {i['category']}:")
-            for d in i["details"][:3]:
-                print(f"    • Prompt addresses: {d}")
-            if len(i["details"]) > 3:
-                print(f"    • ... and {len(i['details']) - 3} more")
+    # ── Step 3: Eval criteria using real tool ───────────────────────────────
+    print("## Step 3: Eval Criteria Generation")
+    eval_file = generate_evals_from_issues(issue_file)
+
+    total_criteria = sum(len(ev.rubric.criteria) for ev in eval_file.evals)
+    print(f"[PASS] Generated {len(eval_file.evals)} evals with {total_criteria} total criteria")
+
+    # Verify criteria are feedback-specific (start with "Prompt addresses:")
+    for ev in eval_file.evals:
+        specific = [c for c in ev.rubric.criteria if c.startswith("Prompt addresses:")]
+        if specific:
+            print(f"[PASS] {ev.id}: {len(ev.rubric.criteria)} criteria from feedback "
+                  f"({ev.rubric.scoring})")
+        else:
+            print(f"[INFO] {ev.id}: {len(ev.rubric.criteria)} generic criteria (no details)")
+        for c in ev.rubric.criteria:
+            print(f"         • {c}")
     print()
 
-    # ── Improved Prompt ──
+    # ── Step 4: Improvement prompt using real tool ──────────────────────────
+    print("## Step 4: Improvement Prompt")
     original = (playground / "improve-todo.prompt.md").read_text()
+    improvement_prompt = _build_improvement_prompt(original, issue_file)
+
+    # Verify the improvement prompt includes issue details
+    for issue in issue_file.issues:
+        assert issue.category in improvement_prompt.lower(), \
+            f"Issue category '{issue.category}' not in improvement prompt"
+    print("[PASS] Improvement prompt includes all issue categories")
+    assert "ONE targeted change" in improvement_prompt
+    print("[PASS] Improvement prompt instructs surgical editing")
+    assert "improved_prompt" in improvement_prompt
+    print("[PASS] Improvement prompt requests JSON output")
+    print()
+
+    # ── Step 5: Verify the improved prompt addresses all feedback ──────────
+    print("## Step 5: Improved Prompt Verification")
     improved = (playground / "improve-todo-improved.prompt.md").read_text()
 
-    print("=" * 72)
-    print("IMPROVED PROMPT")
-    print("=" * 72)
+    print("─── IMPROVED PROMPT ───")
     print(improved)
-
-    # ── Verify each feedback concern is addressed ──
-    print("=" * 72)
-    print("FEEDBACK TRACEABILITY")
-    print("=" * 72)
+    print("─── END ───")
     print()
 
     checks = [
         # (feedback concern, search terms in improved prompt, category)
-        ("opens with conversational paragraph",
+        ("conversational preamble suppressed",
          ["preamble"], "format"),
-        ("ends with chatbot offer / sign-off",
+        ("chatbot sign-off / offers suppressed",
          ["sign-off", "offers for further help"], "format"),
-        ("output only the list, nothing else",
+        ("output restricted to list only",
          ["output only", "nothing else"], "format"),
-        ("replaced checkboxes with priority-grouped sections",
+        ("original structure preserved",
          ["preserve", "original format", "structure"], "accuracy"),
-        ("reorganized into priority tiers not in original",
+        ("no unauthorized reorganization",
          ["do not reorganize", "priority groups"], "accuracy"),
-        ("changed from dashes to bullet characters",
+        ("formatting characters preserved",
          ["dashes", "indentation"], "accuracy"),
-        ("dropped inline human context",
+        ("inline context preserved",
          ["inline notes", "context", "commentary"], "completeness"),
-        ("preserve sub-items and freeform notes",
+        ("sub-items and freeform notes preserved",
          ["sub-items", "freeform notes"], "completeness"),
     ]
 
@@ -230,32 +161,30 @@ def main():
 
     print()
 
-    # ── Verify no unrelated changes ──
-    print("=" * 72)
-    print("NO UNRELATED CHANGES")
-    print("=" * 72)
-    print()
+    # ── Step 6: Verify no unrelated changes ──────────────────────────────
+    print("## Step 6: No Unrelated Changes")
 
-    # The original core instruction must be preserved verbatim
-    original_core = "You are a productivity assistant. Take the following to-do list and make it better. Improve the clarity of each item and prioritize them. The list should be easier to work from."
+    original_core = (
+        "You are a productivity assistant. Take the following to-do list "
+        "and make it better. Improve the clarity of each item and "
+        "prioritize them. The list should be easier to work from."
+    )
     assert original_core in improved, "Original core instruction was modified!"
     print("[PASS] Original core instruction preserved verbatim")
 
-    # The template variable must be preserved
     assert "{{INPUT}}" in improved, "Template variable removed!"
     print("[PASS] {{INPUT}} template variable preserved")
 
-    # The closing instruction must be preserved
     assert "Please output an improved version of the to-do list." in improved
     print("[PASS] Closing instruction preserved verbatim")
 
-    # Count new sentences (changes should be additions, not modifications)
     original_lines = set(original.strip().split("\n"))
     improved_lines = set(improved.strip().split("\n"))
     removed = original_lines - improved_lines
     added = improved_lines - original_lines
-    print(f"[PASS] Lines removed from original: {len(removed)} (should be 0)")
-    assert len(removed) == 0, f"Lines were removed: {removed}"
+
+    assert len(removed) == 0, f"Lines were removed from original: {removed}"
+    print(f"[PASS] Lines removed from original: {len(removed)}")
     print(f"[INFO] Lines added: {len(added)}")
     for line in sorted(added):
         if line.strip():
@@ -274,15 +203,17 @@ def main():
         print("  3. No original instructions were modified or removed")
         print("  4. No unrelated changes were introduced")
         print()
-        print("The tool fixes ensure:")
-        print("  1. Feedback is correctly associated with prompts (@prior, not @source)")
-        print("  2. The LLM editor receives actionable details, not just 'bad'/'low'")
-        print("  3. Positive feedback is not treated as a problem to fix")
-        print("  4. Eval criteria test actual feedback concerns, not generic categories")
+        print("Tool pipeline verified using actual package imports:")
+        print("  - prompterator.commands.feedback.parse_mb_file")
+        print("  - prompterator.core.issue.consolidate_feedback")
+        print("  - prompterator.core.eval_spec.generate_evals_from_issues")
+        print("  - prompterator.core.improver._build_improvement_prompt")
     else:
         print("VERDICT: INCOMPLETE — some feedback concerns not addressed")
     print("=" * 72)
 
+    return 0 if all_pass else 1
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

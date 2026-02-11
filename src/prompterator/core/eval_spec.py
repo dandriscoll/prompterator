@@ -42,30 +42,103 @@ def _generate_eval_id(prompt_ref: str, category: str, index: int) -> str:
     return f"eval-{base}-{category}-{index:02d}"
 
 
+_MAX_CRITERIA_PER_ISSUE = 5
+
+
 def _criteria_from_evidence(issue) -> list[str]:
     """Extract specific eval criteria from issue evidence details.
 
     Turns feedback like 'note=opens with conversational paragraph' into
-    a testable criterion like 'Prompt instructs against opening with
-    conversational paragraph'.
+    a testable criterion.  Deduplicates semantically overlapping notes
+    so that the resulting criteria list stays tractable (capped at
+    ``_MAX_CRITERIA_PER_ISSUE``).
     """
-    criteria = []
-    seen = set()
+    details: list[str] = []
 
     for ev in issue.evidence:
         feedback = ev.feedback
-        # Extract the note/detail text
         detail = None
         for marker in ("; note=", "; needs=", "; detail="):
             if marker in feedback:
                 detail = feedback.split(marker, 1)[1]
                 break
+        if detail:
+            details.append(detail)
 
-        if detail and detail not in seen:
-            seen.add(detail)
-            criteria.append(f"Prompt addresses: {detail}")
+    unique = _deduplicate_details(details)
+    return [f"Prompt addresses: {d}" for d in unique[:_MAX_CRITERIA_PER_ISSUE]]
 
-    return criteria
+
+def _deduplicate_details(details: list[str]) -> list[str]:
+    """Collapse semantically overlapping feedback notes into unique themes.
+
+    Uses a word-overlap heuristic with synonym expansion: if a new detail
+    shares more than 40% of its significant words (after synonym
+    normalisation) with an already-kept detail, it is treated as a
+    duplicate.  The first (longest / most specific) detail wins.
+    """
+    if not details:
+        return []
+
+    # Sort longest-first so the most descriptive note is kept.
+    details = sorted(details, key=len, reverse=True)
+
+    # Groups of words that should be treated as identical for overlap.
+    _SYNONYM_GROUPS: list[set[str]] = [
+        {"preamble", "intro", "introduction", "conversational", "chatty",
+         "opening", "framing"},
+        {"sign-off", "signoff", "offer", "offering", "offers", "chatbot"},
+        {"dashes", "bullets", "bullet", "characters", "checkboxes",
+         "checkbox", "formatting"},
+        {"priority", "priorities", "groups", "grouped", "sections",
+         "tiers", "taxonomy", "headings"},
+        {"reorganize", "reorganized", "restructured", "rewrite",
+         "re-sorted", "flattened", "stripped"},
+        {"structure", "structural", "structured", "format"},
+    ]
+
+    # Build a quick lookup: word → canonical representative
+    _synonyms: dict[str, str] = {}
+    for group in _SYNONYM_GROUPS:
+        canonical = sorted(group)[0]  # deterministic pick
+        for word in group:
+            _synonyms[word] = canonical
+
+    stop = {
+        "a", "an", "the", "and", "or", "but", "is", "was", "are", "were",
+        "in", "on", "at", "to", "for", "of", "with", "from", "as", "not",
+        "that", "this", "it", "its", "into", "than", "which", "every",
+        "other", "same", "still", "also", "model", "output", "input",
+        "would", "should", "could", "just", "already", "show", "before",
+        "after", "actually", "really", "very", "new", "own", "original",
+        "list", "content", "rendered", "lines", "top", "end", "bottom",
+    }
+
+    def _significant_words(text: str) -> set[str]:
+        words = set()
+        for w in text.lower().split():
+            w = w.strip(".,;:!?\"'()-")
+            if len(w) > 2 and w not in stop:
+                words.add(_synonyms.get(w, w))
+        return words
+
+    kept: list[tuple[str, set[str]]] = []
+    for detail in details:
+        words = _significant_words(detail)
+        if not words:
+            continue
+
+        is_duplicate = False
+        for _kept_detail, kept_words in kept:
+            overlap = words & kept_words
+            if len(overlap) / len(words) > 0.4:
+                is_duplicate = True
+                break
+
+        if not is_duplicate:
+            kept.append((detail, words))
+
+    return [text for text, _words in kept]
 
 
 def generate_evals_from_issues(issue_file: IssueFile) -> EvalFile:

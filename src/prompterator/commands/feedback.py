@@ -42,6 +42,23 @@ def _parse_feedback_string(feedback_text: str) -> list[tuple[str, str, str | Non
     return results
 
 
+def _extract_prior_prompt_ref(raw_content: str) -> str | None:
+    """Extract prompt file reference from @prior directives in raw .mb content.
+
+    The markback library only stores one @prior per record (the last one),
+    but .mb files can have multiple @prior lines per block.  We need to
+    scan the raw text to find the @prior that points to the prompt file
+    (.prompt.txt or .prompt.md) rather than the input data file.
+    """
+    for line in raw_content.splitlines():
+        line = line.strip()
+        if line.startswith("@prior "):
+            value = line.split(" ", 1)[1].strip()
+            if value.endswith(".prompt.txt") or value.endswith(".prompt.md"):
+                return value
+    return None
+
+
 def parse_mb_file(path: Path) -> Feedback:
     """Parse a markback file into Feedback model.
 
@@ -62,7 +79,10 @@ def parse_mb_file(path: Path) -> Feedback:
     result = markback.parse_string(content, source_file=path)
 
     entries = []
-    prompt_ref = None
+
+    # The markback library only stores one @prior per record (the last).
+    # Scan raw content to find the @prior that references the prompt file.
+    prompt_ref = _extract_prior_prompt_ref(content)
 
     # Extract feedback from markback records
     for record in result.records:
@@ -70,18 +90,7 @@ def parse_mb_file(path: Path) -> Feedback:
         if not feedback_text:
             continue
 
-        # Prefer @prior prompt files (.prompt.txt/.prompt.md) for prompt_ref,
-        # since @source points to the output file, not the prompt being evaluated.
-        if not prompt_ref and hasattr(record, "priors") and record.priors:
-            for prior in record.priors:
-                prior_val = getattr(prior, "value", None) or str(prior)
-                if prior_val and (
-                    prior_val.endswith(".prompt.txt") or prior_val.endswith(".prompt.md")
-                ):
-                    prompt_ref = prior_val
-                    break
-
-        # Fall back to @source if no prompt prior was found
+        # Fall back to @source if no prompt prior was found in raw content
         if not prompt_ref and hasattr(record, "source") and record.source:
             source_val = getattr(record.source, "value", None) or str(record.source)
             if source_val:
