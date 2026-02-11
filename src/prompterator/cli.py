@@ -1,6 +1,7 @@
 """CLI definition for prompterator."""
 
 import click
+from dotenv import load_dotenv
 
 from prompterator import __version__
 from prompterator.commands.collect import collect_cmd
@@ -36,7 +37,10 @@ def main() -> None:
 
     Run 'prompterator init' to create a configuration file.
     """
-    pass
+    from pathlib import Path as _Path
+    _dotenv_path = _Path.cwd() / ".env"
+    if _dotenv_path.is_file():
+        load_dotenv(_dotenv_path, override=True)
 
 
 # Register commands
