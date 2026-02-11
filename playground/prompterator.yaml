@@ -27,7 +27,7 @@ directories:
 
 stacks:
   default:
-    runner: "./llm-runner"
+    runner: "azure-openai"
     model: "gpt-5.1-chat"
     api_version: "2024-02-01"
 
