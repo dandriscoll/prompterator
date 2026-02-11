@@ -86,6 +86,7 @@ def run_tuning_loop(
     *,
     critic_script: str | None = None,
     critic_script_timeout: int = 60,
+    patience: int = 2,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -98,6 +99,7 @@ def run_tuning_loop(
         max_iterations: Maximum number of iterations.
         output_dir: Directory for output files.
         on_iteration: Optional callback(iteration_record) for progress reporting.
+        patience: Number of non-improving iterations to tolerate before stopping.
 
     Returns:
         TuneReport with all iteration records and final state.
@@ -115,6 +117,8 @@ def run_tuning_loop(
     )
     previous_results = baseline_results
     previous_score = baseline_summary.overall_score
+    best_score = previous_score
+    stall_count = 0
 
     for i in range(1, max_iterations + 1):
         # Generate improvement
@@ -151,15 +155,22 @@ def run_tuning_loop(
         if on_iteration:
             on_iteration(record)
 
-        # Check termination: no improvement
-        if new_summary.overall_score <= previous_score and i > 1:
-            break
-
         # Check termination: all pass
         if new_summary.verdict == "PASS":
             current_text = improved_text
             previous_results = new_results
             previous_score = new_summary.overall_score
+            break
+
+        # Track stalls (no improvement over best score)
+        if new_summary.overall_score > best_score:
+            best_score = new_summary.overall_score
+            stall_count = 0
+        else:
+            stall_count += 1
+
+        # Check termination: patience exhausted
+        if stall_count >= patience and i > 1:
             break
 
         # Continue

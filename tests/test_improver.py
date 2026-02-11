@@ -18,7 +18,7 @@ def test_build_improvement_prompt_structure(sample_issue_file):
     assert "Original text" in prompt
     assert "unclear-instructions" in prompt
     assert "missing-examples" in prompt
-    assert "surgical" in prompt.lower() or "ONE targeted change" in prompt
+    assert "ALL" in prompt or "all failing issues" in prompt.lower()
 
 
 def test_surgical_prompt_includes_rationale(sample_issue_file):

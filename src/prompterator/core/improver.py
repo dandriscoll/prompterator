@@ -21,7 +21,7 @@ def _build_improvement_prompt(
 
     issues_section = "\n".join(issues_text) if issues_text else "No specific issues identified."
 
-    prompt = f"""You are a surgical prompt editor. Your task is to improve the following prompt by making exactly ONE targeted change that addresses the most impactful issue.
+    prompt = f"""You are a prompt editor. Your task is to improve the following prompt by addressing ALL of the failing issues listed below. Add explicit constraints and instructions to the prompt so that each issue is prevented.
 
 ORIGINAL PROMPT:
 ---
@@ -49,9 +49,10 @@ ITERATION: {iteration}"""
     prompt += """
 
 INSTRUCTIONS:
-1. Make exactly ONE targeted change to address the most impactful failing issue
-2. Minimize edit distance - preserve all unchanged text verbatim
-3. Focus on the highest-severity unresolved issue first
+1. Address ALL failing issues by adding explicit constraints to the prompt
+2. For each failing issue, add a clear, direct instruction that prevents the problem
+3. Preserve the original intent and overall structure of the prompt
+4. Focus on adding constraints rather than rewriting - keep existing text and append rules
 
 Respond with a JSON object (no markdown fencing):
 {
@@ -64,9 +65,10 @@ Respond with a JSON object (no markdown fencing):
 
 
 _SURGICAL_SYSTEM = (
-    "You are a surgical prompt editor. Make exactly ONE targeted change per iteration. "
+    "You are a prompt editor. Address ALL failing issues in a single pass by adding "
+    "explicit constraints and instructions to the prompt. "
     "Output valid JSON with rationale, changed_section, and improved_prompt fields. "
-    "Minimize edit distance. Preserve all unchanged text verbatim."
+    "Preserve existing prompt text and append clear rules that prevent each problem."
 )
 
 

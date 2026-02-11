@@ -99,12 +99,12 @@ def tune_cmd(
 
     if dry_run:
         click.echo("[dry-run] Would run tuning loop with the above configuration.")
-        click.echo(f"[dry-run] Output directory: {output_dir or '.prompterator/tune'}")
+        click.echo(f"[dry-run] Output directory: {output_dir or 'tune'}")
         return
 
     # Set up output directory
     if output_dir is None:
-        output_dir = base_dir / ".prompterator" / "tune"
+        output_dir = base_dir / "tune"
 
     # Initialize LLM clients
     critic_llm = None

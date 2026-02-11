@@ -107,9 +107,9 @@ def test_tuning_loop_no_improvement_stops(sample_issue_file, sample_eval_file):
 
         report = run_tuning_loop(
             prompt_path, sample_issue_file, sample_eval_file,
-            editor, critic, max_iterations=10,
+            editor, critic, max_iterations=10, patience=1,
         )
-        # Should stop at iteration 2 due to no improvement
+        # Should stop at iteration 2 due to no improvement (patience=1)
         assert len(report.iterations) == 2
     finally:
         prompt_path.unlink(missing_ok=True)
