@@ -1,10 +1,23 @@
-"""Issue consolidation logic - aggregate feedback into issues."""
+"""Issue consolidation logic - aggregate feedback into issues via LLM clustering."""
 
-from collections import defaultdict
+import json
 from pathlib import Path
 
 from prompterator.models.feedback import Feedback
 from prompterator.models.issue import Issue, IssueEvidence, IssueFile
+from prompterator.runners.llm import LLMClient
+
+
+_CLUSTER_SYSTEM = (
+    "You are a feedback analyst. You receive a numbered list of free-form observations "
+    "about LLM-generated outputs. Your job is to cluster the observations by the real "
+    "underlying problem they describe. Ignore positive observations (praise, approval, "
+    "things that are fine). Output ONLY a JSON array of clusters. Each cluster has:\n"
+    '  "label": a short kebab-case tag (e.g. "preamble-insertion", "structural-rewrite"),\n'
+    '  "summary": one sentence describing the problem,\n'
+    '  "evidence_indices": list of 0-based indices into the input observations.\n'
+    "Do not wrap the JSON in markdown fences."
+)
 
 
 def _determine_severity(occurrences: int, total_feedback_sources: int) -> str:
@@ -22,103 +35,89 @@ def _determine_severity(occurrences: int, total_feedback_sources: int) -> str:
         return "low"
 
 
-def _generate_issue_id(prompt_ref: str, category: str, index: int) -> str:
+def _generate_issue_id(prompt_ref: str, index: int) -> str:
     """Generate a unique issue ID."""
-    # Extract just the base name without extension
     base = Path(prompt_ref).stem.split(".")[0]
-    return f"issue-{base}-{category}-{index:02d}"
+    return f"issue-{base}-{index:02d}"
 
 
 def consolidate_feedback(
     feedback_list: list[Feedback],
     prompt_ref: str,
-    categories: list[str],
+    llm_client: LLMClient,
     min_occurrences: int = 1,
 ) -> IssueFile:
-    """Consolidate multiple feedback entries into issues.
+    """Consolidate multiple feedback entries into issues via LLM clustering.
 
     Args:
         feedback_list: List of parsed feedback objects.
         prompt_ref: Reference to the prompt file.
-        categories: Valid category names.
-        min_occurrences: Minimum occurrences to create an issue.
+        llm_client: LLM client for clustering.
+        min_occurrences: Minimum evidence count to keep an issue.
 
     Returns:
         IssueFile with consolidated issues.
     """
-    # Group evidence by category
-    category_evidence: dict[str, list[IssueEvidence]] = defaultdict(list)
-    category_values: dict[str, list[str]] = defaultdict(list)
-    category_details: dict[str, list[str]] = defaultdict(list)
-
-    # Values that indicate positive/acceptable feedback (not issues)
-    positive_values = {"good", "great", "fine", "acceptable", "ok", "excellent"}
-
+    # 1. Collect all (source_file, text) pairs
+    observations: list[tuple[str, str]] = []
     for feedback in feedback_list:
         for entry in feedback.entries:
-            # Normalize category name
-            cat = entry.category.lower()
-            if cat not in [c.lower() for c in categories]:
-                continue
+            observations.append((feedback.source_file, entry.text))
 
-            # Skip positive feedback — these are not issues to fix
-            if entry.value.lower() in positive_values:
-                continue
+    if not observations:
+        return IssueFile(version="1.0", prompt_ref=prompt_ref, issues=[])
 
-            evidence = IssueEvidence(
-                source=feedback.source_file,
-                feedback=f"{entry.category}={entry.value}"
-                + (f"; {entry.details}" if entry.details else ""),
-            )
-            category_evidence[cat].append(evidence)
-            category_values[cat].append(entry.value)
+    # 2. Build prompt listing every observation
+    lines = []
+    for idx, (source, text) in enumerate(observations):
+        lines.append(f"[{idx}] ({source}) {text}")
+    user_prompt = "\n".join(lines)
 
-            # Collect actionable detail text for the summary
-            if entry.details:
-                # Extract the text after 'note=' or 'needs=' prefix
-                detail_text = entry.details
-                for prefix in ("note=", "needs=", "detail="):
-                    if detail_text.startswith(prefix):
-                        detail_text = detail_text[len(prefix):]
-                        break
-                if detail_text not in category_details[cat]:
-                    category_details[cat].append(detail_text)
+    # 3. Ask the LLM to cluster
+    raw_response = llm_client.generate(user_prompt, system=_CLUSTER_SYSTEM)
 
-    # Create issues for categories meeting threshold
-    issues = []
+    # Parse LLM response
+    try:
+        clusters = json.loads(raw_response)
+    except json.JSONDecodeError:
+        # Try to find JSON array in the response
+        start = raw_response.find("[")
+        end = raw_response.rfind("]") + 1
+        if start >= 0 and end > start:
+            clusters = json.loads(raw_response[start:end])
+        else:
+            clusters = []
+
+    # 4. Build issues from clusters
+    total_sources = len(feedback_list)
+    issues: list[Issue] = []
     issue_index = 1
 
-    for cat in categories:
-        cat_lower = cat.lower()
-        evidence_list = category_evidence.get(cat_lower, [])
+    for cluster in clusters:
+        label = cluster.get("label", f"issue-{issue_index}")
+        summary = cluster.get("summary", "")
+        evidence_indices = cluster.get("evidence_indices", [])
 
-        if len(evidence_list) < min_occurrences:
+        # Build evidence list
+        evidence: list[IssueEvidence] = []
+        for idx in evidence_indices:
+            if 0 <= idx < len(observations):
+                source, text = observations[idx]
+                evidence.append(IssueEvidence(source=source, feedback=text))
+
+        # Apply min_occurrences threshold
+        if len(evidence) < min_occurrences:
             continue
 
-        # Generate summary incorporating specific feedback details
-        details = category_details.get(cat_lower, [])
-        if details:
-            # Use the actual feedback notes for a rich, actionable summary
-            summary = f"{cat.capitalize()}: " + "; ".join(details[:5])
-            if len(details) > 5:
-                summary += f" (+{len(details) - 5} more)"
-        else:
-            # Fall back to values if no details available
-            values = category_values.get(cat_lower, [])
-            unique_values = list(set(values))
-            if len(unique_values) == 1:
-                summary = f"{cat.capitalize()} issue: {unique_values[0]}"
-            else:
-                summary = f"{cat.capitalize()} issues noted: {', '.join(unique_values[:3])}"
-                if len(unique_values) > 3:
-                    summary += f" (+{len(unique_values) - 3} more)"
+        # Compute severity from evidence count ratio
+        severity = _determine_severity(len(evidence), total_sources)
 
         issue = Issue(
-            id=_generate_issue_id(prompt_ref, cat_lower, issue_index),
-            category=cat_lower,
-            severity=_determine_severity(len(evidence_list), len(feedback_list)),
+            id=_generate_issue_id(prompt_ref, issue_index),
+            category=label,
+            severity=severity,
             summary=summary,
-            evidence=evidence_list,
+            evidence=evidence,
         )
         issues.append(issue)
         issue_index += 1

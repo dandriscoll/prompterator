@@ -1,25 +1,25 @@
 @source outputs/003-r2.out.md
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
-<<< format=bad; note=two lines of conversational framing before the actual content
+<<< two lines of conversational framing before the actual content
 
 ---
 
 @source outputs/003-r2.out.md
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
-<<< accuracy=low; note=input already had per-item P0 P1 P2 P3 tags but model stripped those and created section groupings instead
+<<< input already had per-item P0 P1 P2 P3 tags but model stripped those and created section groupings instead
 
 ---
 
 @source outputs/003-r2.out.md
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
-<<< accuracy=medium; note=kept the original title which is good but renamed it with Revised which is presumptuous
+<<< kept the original title which is good but renamed it with Revised which is presumptuous
 
 ---
 
 @source outputs/003-r2.out.md
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
-<<< clarity=good; note=wording tweaks on individual items are fine
+<<< wording tweaks on individual items are fine

@@ -48,12 +48,6 @@ critic:
   mode: "llm"
 
 feedback:
-  categories:
-    - clarity
-    - completeness
-    - accuracy
-    - tone
-    - format
   min_occurrences: 1
 
 naming:

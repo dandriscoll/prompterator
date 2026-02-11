@@ -1,18 +1,18 @@
 @source outputs/001-r2.out.md
 @prior improve-todo.prompt.md
 @prior 001.todoosy.md
-<<< format=bad; note=chatty preamble before the list content
+<<< chatty preamble before the list content
 
 ---
 
 @source outputs/001-r2.out.md
 @prior improve-todo.prompt.md
 @prior 001.todoosy.md
-<<< accuracy=low; note=dropped checkbox format and reorganized into priority tiers that werent in the original
+<<< dropped checkbox format and reorganized into priority tiers that werent in the original
 
 ---
 
 @source outputs/001-r2.out.md
 @prior improve-todo.prompt.md
 @prior 001.todoosy.md
-<<< clarity=good; note=vague items got real descriptions which is the actual goal
+<<< vague items got real descriptions which is the actual goal

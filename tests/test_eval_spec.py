@@ -17,12 +17,13 @@ def test_generate_evals_from_issues(sample_issue_file):
     assert eval_file.prompt_ref == sample_issue_file.prompt_ref
 
 
-def test_category_criteria_mapping(sample_issue_file):
-    """Eval criteria come from CATEGORY_CRITERIA mapping."""
+def test_category_criteria_from_evidence(sample_issue_file):
+    """Eval criteria come from evidence text since LLM-generated labels don't match CATEGORY_CRITERIA."""
     eval_file = generate_evals_from_issues(sample_issue_file)
-    clarity_eval = eval_file.evals[0]
-    assert clarity_eval.rubric is not None
-    assert clarity_eval.rubric.criteria == CATEGORY_CRITERIA["clarity"]
+    # First issue has evidence, so criteria come from evidence text
+    first_eval = eval_file.evals[0]
+    assert first_eval.rubric is not None
+    assert all("Prompt addresses:" in c for c in first_eval.rubric.criteria)
 
 
 def test_high_severity_all_required(sample_issue_file):
@@ -36,25 +37,26 @@ def test_high_severity_all_required(sample_issue_file):
 
 def test_eval_id_generation():
     """Eval IDs follow expected pattern."""
-    assert _generate_eval_id("test.prompt.txt", "clarity", 1) == "eval-test-clarity-01"
+    assert _generate_eval_id("test.prompt.txt", "preamble-insertion", 1) == "eval-test-preamble-insertion-01"
 
 
 def test_unknown_category_fallback():
-    """Unknown categories get a generic criterion."""
+    """LLM-generated labels that don't match CATEGORY_CRITERIA get a generic fallback criterion."""
     issue_file = IssueFile(
         prompt_ref="test.prompt.txt",
         issues=[
             Issue(
-                id="issue-test-custom-01",
-                category="custom_thing",
+                id="issue-test-01",
+                category="preamble-insertion",
                 severity="medium",
-                summary="Custom issue",
+                summary="Output starts with unwanted preamble",
             ),
         ],
     )
     eval_file = generate_evals_from_issues(issue_file)
     assert len(eval_file.evals) == 1
-    assert eval_file.evals[0].rubric.criteria == ["Addresses custom_thing concerns"]
+    # No evidence → falls back to CATEGORY_CRITERIA lookup, which won't match → generic
+    assert eval_file.evals[0].rubric.criteria == ["Addresses preamble-insertion concerns"]
 
 
 # ── _deduplicate_details tests ──
@@ -100,45 +102,46 @@ def test_deduplicate_preserves_distinct_items():
     assert len(result) == 4
 
 
-def test_evidence_criteria_with_notes():
-    """Criteria are derived from note= details when present."""
+def test_evidence_criteria_with_plain_text():
+    """Criteria are derived from plain-text evidence feedback."""
     issue_file = IssueFile(
         prompt_ref="test.prompt.txt",
         issues=[
             Issue(
-                id="issue-test-format-01",
-                category="format",
+                id="issue-test-01",
+                category="preamble-insertion",
                 severity="high",
-                summary="Format issues",
+                summary="Output starts with unwanted preamble",
                 evidence=[
-                    IssueEvidence(source="r1.mb", feedback="format=bad; note=preamble before list"),
-                    IssueEvidence(source="r2.mb", feedback="format=bad; note=chatbot sign-off at end"),
-                    IssueEvidence(source="r3.mb", feedback="format=poor"),  # no detail
+                    IssueEvidence(source="r1.mb", feedback="preamble before list"),
+                    IssueEvidence(source="r2.mb", feedback="chatbot sign-off at end"),
+                    IssueEvidence(source="r3.mb", feedback="changed checkbox format to bullets"),
                 ],
             ),
         ],
     )
     eval_file = generate_evals_from_issues(issue_file)
     criteria = eval_file.evals[0].rubric.criteria
-    assert len(criteria) == 2
+    assert len(criteria) == 3
     assert any("preamble" in c for c in criteria)
     assert any("sign-off" in c for c in criteria)
+    assert any("checkbox" in c for c in criteria)
 
 
 def test_evidence_criteria_capped():
     """Even with many unique evidence details, criteria count is capped."""
     evidence = [
-        IssueEvidence(source=f"r{i}.mb", feedback=f"format=bad; note=unique problem {i}")
+        IssueEvidence(source=f"r{i}.mb", feedback=f"unique problem number {i}")
         for i in range(20)
     ]
     issue_file = IssueFile(
         prompt_ref="test.prompt.txt",
         issues=[
             Issue(
-                id="issue-test-format-01",
-                category="format",
+                id="issue-test-01",
+                category="preamble-insertion",
                 severity="high",
-                summary="Format issues",
+                summary="Many problems",
                 evidence=evidence,
             ),
         ],

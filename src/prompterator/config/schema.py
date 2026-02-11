@@ -112,10 +112,6 @@ class CriticConfig(LLMRoleConfig):
 class FeedbackConfig(BaseModel):
     """Feedback processing configuration."""
 
-    categories: list[str] = Field(
-        default_factory=lambda: ["clarity", "completeness", "accuracy", "tone", "format"],
-        description="Valid feedback categories",
-    )
     min_occurrences: int = Field(
         default=1,
         ge=1,
@@ -240,7 +236,6 @@ class Config(BaseModel):
                 **({"script_timeout": self.critic.script_timeout} if self.critic.script_timeout != 60 else {}),
             },
             "feedback": {
-                "categories": self.feedback.categories,
                 "min_occurrences": self.feedback.min_occurrences,
             },
             "naming": {

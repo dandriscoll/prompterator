@@ -1,18 +1,18 @@
 @source outputs/002-r2.out.md
 @prior improve-todo.prompt.md
 @prior 002.todoosy.md
-<<< format=bad; note=same preamble problem as every other output
+<<< same preamble problem as every other output
 
 ---
 
 @source outputs/002-r2.out.md
 @prior improve-todo.prompt.md
 @prior 002.todoosy.md
-<<< accuracy=low; note=replaced flat bullet list with priority groups and changed formatting characters
+<<< replaced flat bullet list with priority groups and changed formatting characters
 
 ---
 
 @source outputs/002-r2.out.md
 @prior improve-todo.prompt.md
 @prior 002.todoosy.md
-<<< clarity=good; note=content improvements are fine, vague items got context added
+<<< content improvements are fine, vague items got context added

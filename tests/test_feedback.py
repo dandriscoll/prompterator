@@ -5,7 +5,6 @@ from pathlib import Path
 
 from prompterator.commands.feedback import (
     _extract_prior_prompt_ref,
-    _parse_feedback_string,
     parse_mb_file,
 )
 
@@ -19,7 +18,7 @@ def test_extract_prior_prompt_ref_from_prompt_md():
 @source outputs/001-r1.out.md
 @prior improve-todo.prompt.md
 @prior 001.todoosy.md
-<<< format=bad; note=preamble
+<<< opens with a conversational paragraph
 """
     assert _extract_prior_prompt_ref(content) == "improve-todo.prompt.md"
 
@@ -30,7 +29,7 @@ def test_extract_prior_prompt_ref_from_prompt_txt():
 @source outputs/001-r1.out.md
 @prior my-prompt.prompt.txt
 @prior data.csv
-<<< clarity=low
+<<< some feedback text
 """
     assert _extract_prior_prompt_ref(content) == "my-prompt.prompt.txt"
 
@@ -40,7 +39,7 @@ def test_extract_prior_prompt_ref_no_prompt():
     content = """\
 @source outputs/001-r1.out.md
 @prior data.csv
-<<< clarity=low
+<<< some feedback text
 """
     assert _extract_prior_prompt_ref(content) is None
 
@@ -50,32 +49,9 @@ def test_extract_prior_prompt_ref_first_match_wins():
     content = """\
 @prior first.prompt.md
 @prior second.prompt.md
-<<< format=bad
+<<< some feedback text
 """
     assert _extract_prior_prompt_ref(content) == "first.prompt.md"
-
-
-# ── _parse_feedback_string tests ──
-
-
-def test_parse_feedback_simple():
-    """Simple category=value parsing."""
-    result = _parse_feedback_string("clarity=low")
-    assert len(result) == 1
-    assert result[0] == ("clarity", "low", None)
-
-
-def test_parse_feedback_with_note():
-    """Category with note modifier."""
-    result = _parse_feedback_string("format=bad; note=preamble at top")
-    assert len(result) == 1
-    assert result[0] == ("format", "bad", "note=preamble at top")
-
-
-def test_parse_feedback_multiple():
-    """Multiple categories on one line."""
-    result = _parse_feedback_string("clarity=low; completeness=missing")
-    assert len(result) == 2
 
 
 # ── parse_mb_file integration tests ──
@@ -87,14 +63,14 @@ def test_parse_mb_file_prompt_ref_from_prior():
 @source outputs/001-r1.out.md
 @prior improve-todo.prompt.md
 @prior 001.todoosy.md
-<<< format=bad; note=preamble
+<<< opens with a conversational paragraph that pollutes the output
 
 ---
 
 @source outputs/001-r1.out.md
 @prior improve-todo.prompt.md
 @prior 001.todoosy.md
-<<< accuracy=low; note=structural rewrite
+<<< replaced checkboxes with priority-grouped sections
 """
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".mb", delete=False, dir="/tmp"
@@ -106,16 +82,18 @@ def test_parse_mb_file_prompt_ref_from_prior():
         feedback = parse_mb_file(tmp_path)
         assert feedback.prompt_ref == "improve-todo.prompt.md"
         assert len(feedback.entries) == 2
+        assert feedback.entries[0].text == "opens with a conversational paragraph that pollutes the output"
+        assert feedback.entries[1].text == "replaced checkboxes with priority-grouped sections"
     finally:
         tmp_path.unlink(missing_ok=True)
 
 
-def test_parse_mb_file_positive_values_not_filtered():
-    """Feedback parsing keeps all entries; filtering is done in issue consolidation."""
+def test_parse_mb_file_all_entries_kept():
+    """Feedback parsing keeps all entries including positive observations."""
     content = """\
 @source outputs/001-r1.out.md
 @prior test.prompt.md
-<<< clarity=good; note=items are clear
+<<< individual item rewrites are actually clearer than the originals
 """
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".mb", delete=False, dir="/tmp"
@@ -126,6 +104,6 @@ def test_parse_mb_file_positive_values_not_filtered():
     try:
         feedback = parse_mb_file(tmp_path)
         assert len(feedback.entries) == 1
-        assert feedback.entries[0].value == "good"
+        assert feedback.entries[0].text == "individual item rewrites are actually clearer than the originals"
     finally:
         tmp_path.unlink(missing_ok=True)

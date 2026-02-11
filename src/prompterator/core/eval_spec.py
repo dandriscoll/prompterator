@@ -46,24 +46,18 @@ _MAX_CRITERIA_PER_ISSUE = 5
 
 
 def _criteria_from_evidence(issue) -> list[str]:
-    """Extract specific eval criteria from issue evidence details.
+    """Extract specific eval criteria from issue evidence.
 
-    Turns feedback like 'note=opens with conversational paragraph' into
-    a testable criterion.  Deduplicates semantically overlapping notes
-    so that the resulting criteria list stays tractable (capped at
-    ``_MAX_CRITERIA_PER_ISSUE``).
+    Evidence feedback is now free-form text. Each piece of evidence
+    becomes a candidate criterion.  Deduplicates semantically
+    overlapping entries so that the resulting criteria list stays
+    tractable (capped at ``_MAX_CRITERIA_PER_ISSUE``).
     """
     details: list[str] = []
 
     for ev in issue.evidence:
-        feedback = ev.feedback
-        detail = None
-        for marker in ("; note=", "; needs=", "; detail="):
-            if marker in feedback:
-                detail = feedback.split(marker, 1)[1]
-                break
-        if detail:
-            details.append(detail)
+        if ev.feedback:
+            details.append(ev.feedback)
 
     unique = _deduplicate_details(details)
     return [f"Prompt addresses: {d}" for d in unique[:_MAX_CRITERIA_PER_ISSUE]]

@@ -1,5 +1,9 @@
 """Tests for issue consolidation logic."""
 
+import json
+
+from tests.conftest import MockLLMClient
+
 from prompterator.core.issue import (
     _determine_severity,
     _generate_issue_id,
@@ -8,28 +12,103 @@ from prompterator.core.issue import (
 from prompterator.models.feedback import Feedback, FeedbackEntry
 
 
-def test_consolidate_single_category():
-    """Consolidate feedback with only one category."""
+def test_consolidate_basic():
+    """LLM is called and issues are created from its response."""
     feedback_list = [
         Feedback(
             source_file="r1.mb",
             prompt_ref="test.prompt.txt",
-            entries=[FeedbackEntry(category="clarity", value="unclear")],
+            entries=[FeedbackEntry(text="preamble at the top of the output")],
+        ),
+        Feedback(
+            source_file="r2.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="conversational intro before the list")],
         ),
     ]
-    result = consolidate_feedback(feedback_list, "test.prompt.txt", ["clarity"])
+
+    llm_response = json.dumps([
+        {
+            "label": "preamble-insertion",
+            "summary": "Output starts with unwanted conversational preamble",
+            "evidence_indices": [0, 1],
+        }
+    ])
+    mock = MockLLMClient(responses=[llm_response])
+
+    result = consolidate_feedback(feedback_list, "test.prompt.txt", mock)
     assert len(result.issues) == 1
-    assert result.issues[0].category == "clarity"
+    assert result.issues[0].category == "preamble-insertion"
+    assert result.issues[0].summary == "Output starts with unwanted conversational preamble"
+    assert len(result.issues[0].evidence) == 2
+    assert len(mock.calls) == 1
 
 
-def test_consolidate_multiple_categories(sample_feedback_list):
-    """Consolidate feedback with multiple categories."""
-    categories = ["clarity", "completeness", "tone"]
-    result = consolidate_feedback(sample_feedback_list, "test.prompt.txt", categories)
-    cats = [i.category for i in result.issues]
-    assert "clarity" in cats
-    assert "completeness" in cats
-    assert "tone" in cats
+def test_consolidate_clusters():
+    """LLM returns multiple clusters, each becomes a separate issue."""
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[
+                FeedbackEntry(text="preamble at the top"),
+                FeedbackEntry(text="structural rewrite not requested"),
+            ],
+        ),
+        Feedback(
+            source_file="r2.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[
+                FeedbackEntry(text="chatty intro paragraph"),
+                FeedbackEntry(text="replaced checkboxes with priority groups"),
+            ],
+        ),
+    ]
+
+    llm_response = json.dumps([
+        {
+            "label": "preamble-insertion",
+            "summary": "Output starts with unwanted conversational preamble",
+            "evidence_indices": [0, 2],
+        },
+        {
+            "label": "structural-rewrite",
+            "summary": "Model rewrites document structure instead of preserving it",
+            "evidence_indices": [1, 3],
+        },
+    ])
+    mock = MockLLMClient(responses=[llm_response])
+
+    result = consolidate_feedback(feedback_list, "test.prompt.txt", mock)
+    assert len(result.issues) == 2
+    labels = [i.category for i in result.issues]
+    assert "preamble-insertion" in labels
+    assert "structural-rewrite" in labels
+
+
+def test_min_occurrences_filter():
+    """Clusters with too few entries are filtered by min_occurrences."""
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="preamble at the top")],
+        ),
+    ]
+
+    llm_response = json.dumps([
+        {
+            "label": "preamble-insertion",
+            "summary": "Output starts with unwanted preamble",
+            "evidence_indices": [0],
+        }
+    ])
+    mock = MockLLMClient(responses=[llm_response])
+
+    result = consolidate_feedback(
+        feedback_list, "test.prompt.txt", mock, min_occurrences=2
+    )
+    assert len(result.issues) == 0
 
 
 def test_severity_determination():
@@ -40,22 +119,7 @@ def test_severity_determination():
     assert _determine_severity(0, 0) == "medium"   # edge case
 
 
-def test_min_occurrences_filter():
-    """Issues below min_occurrences are filtered out."""
-    feedback_list = [
-        Feedback(
-            source_file="r1.mb",
-            prompt_ref="test.prompt.txt",
-            entries=[FeedbackEntry(category="clarity", value="ok")],
-        ),
-    ]
-    result = consolidate_feedback(
-        feedback_list, "test.prompt.txt", ["clarity", "tone"], min_occurrences=2
-    )
-    assert len(result.issues) == 0
-
-
 def test_issue_id_generation():
-    """Issue IDs follow expected pattern."""
-    assert _generate_issue_id("test.prompt.txt", "clarity", 1) == "issue-test-clarity-01"
-    assert _generate_issue_id("foo.prompt.txt", "tone", 3) == "issue-foo-tone-03"
+    """Issue IDs follow expected pattern (no category in ID)."""
+    assert _generate_issue_id("test.prompt.txt", 1) == "issue-test-01"
+    assert _generate_issue_id("foo.prompt.txt", 3) == "issue-foo-03"

@@ -8,6 +8,7 @@ import click
 from prompterator.commands.feedback import find_mb_files, parse_mb_file
 from prompterator.config.loader import get_config_base_dir, load_config
 from prompterator.core.issue import consolidate_feedback, save_issue_file
+from prompterator.runners.llm import LLMClient
 
 
 @click.command("issues")
@@ -25,7 +26,7 @@ from prompterator.core.issue import consolidate_feedback, save_issue_file
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Show what would be created without writing files",
+    help="Show what would be created without writing files (still calls LLM for clustering)",
 )
 def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> None:
     """Consolidate feedback into .issue.yaml files."""
@@ -43,6 +44,9 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> No
     if not mb_files:
         click.echo(f"No .mb files found in {directory}")
         return
+
+    # Initialize LLM client with editor role
+    llm_client = LLMClient(**config.resolve_role("editor"))
 
     # Group feedback by prompt reference
     prompt_feedback: dict[str, list] = defaultdict(list)
@@ -69,7 +73,7 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> No
         issue_file = consolidate_feedback(
             feedback_list,
             prompt_ref,
-            config.feedback.categories,
+            llm_client,
             config.feedback.min_occurrences,
         )
 

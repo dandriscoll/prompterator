@@ -16,8 +16,8 @@ def test_build_improvement_prompt_structure(sample_issue_file):
     """Improvement prompt includes issues and instructions."""
     prompt = _build_improvement_prompt("Original text", sample_issue_file)
     assert "Original text" in prompt
-    assert "clarity" in prompt
-    assert "completeness" in prompt
+    assert "unclear-instructions" in prompt
+    assert "missing-examples" in prompt
     assert "surgical" in prompt.lower() or "ONE targeted change" in prompt
 
 

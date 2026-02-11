@@ -1,18 +1,18 @@
 @source outputs/003-r1.out.md
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
-<<< format=bad; note=preamble sentence at the top of the output
+<<< preamble sentence at the top of the output
 
 ---
 
 @source outputs/003-r1.out.md
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
-<<< accuracy=low; note=input was ALREADY well-structured with P0-P3 labels and checkboxes but model still replaced the format with its own priority headings
+<<< input was ALREADY well-structured with P0-P3 labels and checkboxes but model still replaced the format with its own priority headings
 
 ---
 
 @source outputs/003-r1.out.md
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
-<<< format=acceptable; note=moving completed tasks to bottom section is reasonable
+<<< moving completed tasks to bottom section is reasonable

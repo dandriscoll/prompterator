@@ -52,23 +52,23 @@ def sample_feedback_list():
             source_file="review1.mb",
             prompt_ref="test.prompt.txt",
             entries=[
-                FeedbackEntry(category="clarity", value="unclear", details="Instructions are vague"),
-                FeedbackEntry(category="completeness", value="missing", details="No examples"),
+                FeedbackEntry(text="Instructions are vague and unclear"),
+                FeedbackEntry(text="No examples provided"),
             ],
         ),
         Feedback(
             source_file="review2.mb",
             prompt_ref="test.prompt.txt",
             entries=[
-                FeedbackEntry(category="clarity", value="ambiguous", details="Multiple interpretations"),
-                FeedbackEntry(category="tone", value="too formal"),
+                FeedbackEntry(text="Multiple interpretations possible due to ambiguous wording"),
+                FeedbackEntry(text="Tone is too formal for the audience"),
             ],
         ),
         Feedback(
             source_file="review3.mb",
             prompt_ref="test.prompt.txt",
             entries=[
-                FeedbackEntry(category="clarity", value="confusing"),
+                FeedbackEntry(text="Overall structure is confusing"),
             ],
         ),
     ]
@@ -81,23 +81,23 @@ def sample_issue_file():
         prompt_ref="test.prompt.txt",
         issues=[
             Issue(
-                id="issue-test-clarity-01",
-                category="clarity",
+                id="issue-test-01",
+                category="unclear-instructions",
                 severity="high",
-                summary="Clarity issues noted: unclear, ambiguous, confusing",
+                summary="Instructions are vague and allow multiple interpretations",
                 evidence=[
-                    IssueEvidence(source="review1.mb", feedback="clarity=unclear; Instructions are vague"),
-                    IssueEvidence(source="review2.mb", feedback="clarity=ambiguous; Multiple interpretations"),
-                    IssueEvidence(source="review3.mb", feedback="clarity=confusing"),
+                    IssueEvidence(source="review1.mb", feedback="Instructions are vague and unclear"),
+                    IssueEvidence(source="review2.mb", feedback="Multiple interpretations possible due to ambiguous wording"),
+                    IssueEvidence(source="review3.mb", feedback="Overall structure is confusing"),
                 ],
             ),
             Issue(
-                id="issue-test-completeness-02",
-                category="completeness",
+                id="issue-test-02",
+                category="missing-examples",
                 severity="low",
-                summary="Completeness issue: missing",
+                summary="No examples provided to illustrate expected behavior",
                 evidence=[
-                    IssueEvidence(source="review1.mb", feedback="completeness=missing; No examples"),
+                    IssueEvidence(source="review1.mb", feedback="No examples provided"),
                 ],
             ),
         ],
@@ -111,24 +111,24 @@ def sample_eval_file():
         prompt_ref="test.prompt.txt",
         evals=[
             Eval(
-                id="eval-test-clarity-01",
+                id="eval-test-unclear-instructions-01",
                 type="rubric",
-                issue_ref="issue-test-clarity-01",
-                description="Verify clarity improvements",
+                issue_ref="issue-test-01",
+                description="Verify unclear-instructions improvements",
                 rubric=EvalRubric(
                     criteria=[
-                        "Instructions are unambiguous",
-                        "Language is clear and precise",
-                        "Examples are provided where helpful",
+                        "Prompt addresses: Instructions are vague and unclear",
+                        "Prompt addresses: Multiple interpretations possible due to ambiguous wording",
+                        "Prompt addresses: Overall structure is confusing",
                     ],
                     scoring="all_required",
                 ),
             ),
             Eval(
-                id="eval-test-completeness-02",
+                id="eval-test-missing-examples-02",
                 type="rubric",
-                issue_ref="issue-test-completeness-02",
-                description="Verify completeness improvements",
+                issue_ref="issue-test-02",
+                description="Verify missing-examples improvements",
                 rubric=EvalRubric(
                     criteria=[
                         "All required information is present",
@@ -146,8 +146,8 @@ def sample_eval_file():
 def sample_eval_results():
     """Sample eval results with mixed pass/fail."""
     return [
-        EvalResult(eval_id="eval-test-clarity-01", passed=False, score=0.33, details="1/3 criteria met"),
-        EvalResult(eval_id="eval-test-completeness-02", passed=True, score=1.0, details="All criteria met"),
+        EvalResult(eval_id="eval-test-unclear-instructions-01", passed=False, score=0.33, details="1/3 criteria met"),
+        EvalResult(eval_id="eval-test-missing-examples-02", passed=True, score=1.0, details="All criteria met"),
     ]
 
 
