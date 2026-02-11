@@ -61,19 +61,39 @@ def main() -> None:
         messages.append({"role": "system", "content": args.system})
     messages.append({"role": "user", "content": prompt})
 
-    try:
-        response = client.chat.completions.create(
-            model=args.model,
-            messages=messages,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-        )
-        # Extract text from response
+    def _call(**kwargs):
+        response = client.chat.completions.create(**kwargs)
         if response.choices and response.choices[0].message.content:
             print(response.choices[0].message.content)
-    except openai.APIError as e:
-        print(f"API Error: {e}", file=sys.stderr)
-        sys.exit(1)
+
+    kwargs = dict(model=args.model, messages=messages)
+
+    # Try max_completion_tokens first (required by newer models like gpt-5.1),
+    # fall back to max_tokens for older models.
+    for token_param in ("max_completion_tokens", "max_tokens"):
+        try:
+            _call(**kwargs, temperature=args.temperature, **{token_param: args.max_tokens})
+            return
+        except openai.APIError as e:
+            err = str(e)
+            if "unsupported_parameter" in err.lower() and token_param == "max_completion_tokens":
+                continue  # retry with max_tokens
+            if "does not support" in err.lower() and "temperature" in err.lower():
+                # Model only supports default temperature — retry without it
+                try:
+                    _call(**kwargs, **{token_param: args.max_tokens})
+                    return
+                except openai.APIError as e2:
+                    err2 = str(e2)
+                    if "unsupported_parameter" in err2.lower() and token_param == "max_completion_tokens":
+                        continue  # retry with max_tokens
+                    print(f"API Error: {e2}", file=sys.stderr)
+                    sys.exit(1)
+            print(f"API Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    print("Error: could not find working parameter combination", file=sys.stderr)
+    sys.exit(1)
 
 
 if __name__ == "__main__":
