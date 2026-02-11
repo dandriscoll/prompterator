@@ -3,9 +3,9 @@ version: "1.0"
 directories:
   prompts: "."
   feedback: "."
-  issues: ".prompterator/issues"
-  evals: ".prompterator/evals"
-  results: ".prompterator/results"
+  issues: "issues"
+  evals: "evals"
+  results: "results"
 
 # ── LLM Connection Stacks ──────────────────────────────────────────
 # ADMIN: Replace the placeholder values below with real LLM endpoints

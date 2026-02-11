@@ -130,9 +130,9 @@ version: "1.0"
 directories:
   prompts: "."
   feedback: "."
-  issues: ".prompterator/issues"
-  evals: ".prompterator/evals"
-  results: ".prompterator/results"
+  issues: "issues"
+  evals: "evals"
+  results: "results"
 
 # LLM roles (see Conceptual Model above)
 author:

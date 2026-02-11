@@ -11,9 +11,9 @@ class DirectoriesConfig(BaseModel):
 
     prompts: str = Field(default=".", description="Directory for prompt files")
     feedback: str = Field(default=".", description="Directory for feedback files")
-    issues: str = Field(default=".prompterator/issues", description="Directory for issue files")
-    evals: str = Field(default=".prompterator/evals", description="Directory for eval files")
-    results: str = Field(default=".prompterator/results", description="Directory for result files")
+    issues: str = Field(default="issues", description="Directory for issue files")
+    evals: str = Field(default="evals", description="Directory for eval files")
+    results: str = Field(default="results", description="Directory for result files")
 
 
 class StackConfig(BaseModel):
