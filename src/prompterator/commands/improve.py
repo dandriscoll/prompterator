@@ -5,7 +5,11 @@ from pathlib import Path
 import click
 
 from prompterator.config.loader import get_config_base_dir, load_config
-from prompterator.core.improver import generate_improved_prompt, save_improved_prompt
+from prompterator.core.improver import (
+    _build_improvement_prompt,
+    generate_improved_prompt,
+    save_improved_prompt,
+)
 from prompterator.core.issue import load_issue_file
 from prompterator.runners.naming import NamingClient, NamingError
 from prompterator.runners.llm import LLMClient, LLMError
@@ -73,6 +77,17 @@ def improve_cmd(
     click.echo(f"Based on: {len(issue_file.issues)} issues from {issues_path.name}")
     click.echo()
 
+    if dry_run:
+        # Show the improvement prompt that would be sent to the LLM,
+        # without requiring a working LLM connection.
+        with open(prompt) as f:
+            original_text = f.read()
+        improvement_prompt = _build_improvement_prompt(original_text, issue_file)
+        click.echo("--- Improvement prompt (would be sent to LLM) ---")
+        click.echo(improvement_prompt)
+        click.echo("--- End ---")
+        return
+
     # Initialize Editor LLM client
     try:
         llm = LLMClient(**config.resolve_role("editor"))
@@ -87,12 +102,6 @@ def improve_cmd(
     except LLMError as e:
         click.echo(f"LLM error: {e}", err=True)
         raise SystemExit(1)
-
-    if dry_run:
-        click.echo("\n--- Improved Prompt ---")
-        click.echo(improved)
-        click.echo("--- End ---")
-        return
 
     # Check for git mode (from config or --in-place flag)
     use_in_place = in_place or config.workflow.git_mode
