@@ -1,0 +1,45 @@
+version: '1.0'
+prompt_tested: improve-todo.prompt.md
+results:
+- eval_id: eval-improve-todo-chatty-preamble-01
+  passed: false
+  score: 0.0
+  details: "The prompt begins with multiple conversational sentences before giving\
+    \ instructions, which can pollute or precede the to\u2011do list output.; The\
+    \ prompt contains more than two lines of conversational framing before the actionable\
+    \ instruction appears."
+- eval_id: eval-improve-todo-structural-rewrite-02
+  passed: false
+  score: 0.0
+  details: The prompt does not acknowledge or protect an existing structure; it simply
+    instructs the model to improve clarity and prioritize, which permits replacing
+    labels.; The prompt does not constrain the model from creating new taxonomies;
+    it invites restructuring.; The prompt contains no instructions to preserve sub-items
+    or notes, so it does not address this issue.
+- eval_id: eval-improve-todo-formatting-changes-03
+  passed: false
+  score: 0.0
+  details: The prompt does not mention bullet point characters or any requirement
+    to change markdown dashes to bullet points.
+- eval_id: eval-improve-todo-chatbot-signoff-04
+  passed: false
+  score: 0.0
+  details: "The prompt does not mention or request converting anything into a weekly\
+    \ action plan.; The prompt does not reference a sign\u2011off or an offer to create\
+    \ a daily schedule.; The prompt does not mention breaking tasks into subtasks."
+- eval_id: eval-improve-todo-lost-inline-context-05
+  passed: false
+  score: 0.0
+  details: The prompt does not mention, detect, or correct dropped inline human context.
+    It only asks to improve clarity and prioritize items, without addressing missing
+    contextual meaning from the original notes.
+- eval_id: eval-improve-todo-title-renaming-06
+  passed: true
+  score: 1.0
+  details: The prompt does not rename or revise any title at all, so it does not exhibit
+    the presumptuous behavior described.
+summary:
+  overall_score: 0.16666666666666666
+  verdict: PARTIAL
+  passed_count: 1
+  failed_count: 5

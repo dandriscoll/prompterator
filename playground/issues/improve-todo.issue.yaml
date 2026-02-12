@@ -1,0 +1,104 @@
+version: '1.0'
+prompt_ref: improve-todo.prompt.md
+issues:
+- id: issue-improve-todo-01
+  category: chatty-preamble
+  severity: high
+  summary: "The outputs add conversational intro lines that pollute the intended to\u2011\
+    do list content."
+  evidence:
+  - source: /workspace/playground/001-r1.mb
+    feedback: opens with a conversational paragraph that pollutes the to-do list output
+  - source: /workspace/playground/001-r2.mb
+    feedback: chatty preamble before the list content
+  - source: /workspace/playground/002-r1.mb
+    feedback: conversational intro sentence before the actual list
+  - source: /workspace/playground/002-r2.mb
+    feedback: same preamble problem as every other output
+  - source: /workspace/playground/003-r1.mb
+    feedback: preamble sentence at the top of the output
+  - source: /workspace/playground/003-r2.mb
+    feedback: two lines of conversational framing before the actual content
+  - source: /workspace/playground/004-r1.mb
+    feedback: three lines of preamble that would show up in the rendered to-do list
+  - source: /workspace/playground/004-r2.mb
+    feedback: conversational preamble
+  - source: /workspace/playground/005-r1.mb
+    feedback: preamble sentence at top
+  - source: /workspace/playground/005-r2.mb
+    feedback: conversational intro present
+- id: issue-improve-todo-02
+  category: structural-rewrite
+  severity: high
+  summary: "The model rewrites the list structure\u2014adding priority groupings or\
+    \ reordering\u2014even though no structural change was requested."
+  evidence:
+  - source: /workspace/playground/001-r1.mb
+    feedback: "replaced markdown checkboxes with priority-grouped sections \u2014\
+      \ structural rewrite not requested"
+  - source: /workspace/playground/001-r2.mb
+    feedback: dropped checkbox format and reorganized into priority tiers that werent
+      in the original
+  - source: /workspace/playground/002-r1.mb
+    feedback: original was a flat dump with no groupings and model invented a priority
+      structure from scratch
+  - source: /workspace/playground/002-r2.mb
+    feedback: replaced flat bullet list with priority groups and changed formatting
+      characters
+  - source: /workspace/playground/003-r1.mb
+    feedback: input was ALREADY well-structured with P0-P3 labels and checkboxes but
+      model still replaced the format with its own priority headings
+  - source: /workspace/playground/003-r2.mb
+    feedback: input already had per-item P0 P1 P2 P3 tags but model stripped those
+      and created section groupings instead
+  - source: /workspace/playground/004-r1.mb
+    feedback: original was a flat list with inline notes and model imposed an entirely
+      new priority taxonomy with CRITICAL HIGH MEDIUM LOW headings
+  - source: /workspace/playground/004-r2.mb
+    feedback: structure was flattened and re-sorted into priority groups, discarding
+      sub-items and freeform notes that were part of the input
+  - source: /workspace/playground/005-r1.mb
+    feedback: changed from flat checkboxes to priority groups, same structural rewrite
+      as every other output
+  - source: /workspace/playground/005-r2.mb
+    feedback: structure changed from checkboxes to grouped bullets
+- id: issue-improve-todo-03
+  category: formatting-changes
+  severity: low
+  summary: The model changes formatting characters such as checkboxes or dashes to
+    different bullet symbols.
+  evidence:
+  - source: /workspace/playground/002-r1.mb
+    feedback: changed from plain dashes to bullet point characters
+  - source: /workspace/playground/004-r1.mb
+    feedback: changed from markdown dashes to bullet point characters
+- id: issue-improve-todo-04
+  category: chatbot-signoff
+  severity: medium
+  summary: The outputs end with unsolicited chatbot-style offers to further transform
+    the list.
+  evidence:
+  - source: /workspace/playground/001-r1.mb
+    feedback: ends with a chatbot offer to convert into weekly plan
+  - source: /workspace/playground/002-r1.mb
+    feedback: chatbot sign-off offering to make a daily schedule
+  - source: /workspace/playground/004-r1.mb
+    feedback: chatbot offer to convert into weekly action plan at the end
+  - source: /workspace/playground/005-r1.mb
+    feedback: chatbot offer at the end to break into subtasks
+- id: issue-improve-todo-05
+  category: lost-inline-context
+  severity: low
+  summary: Inline notes or human context present in the original items are removed.
+  evidence:
+  - source: /workspace/playground/004-r2.mb
+    feedback: dropped the inline human context from original items like which is insane
+      and pinged them twice
+- id: issue-improve-todo-06
+  category: title-renaming
+  severity: low
+  summary: The model renames the user's original title in a presumptive way.
+  evidence:
+  - source: /workspace/playground/003-r2.mb
+    feedback: kept the original title which is good but renamed it with Revised which
+      is presumptuous

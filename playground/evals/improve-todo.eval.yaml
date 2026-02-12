@@ -1,0 +1,73 @@
+version: '1.0'
+prompt_ref: improve-todo.prompt.md
+evals:
+- id: eval-improve-todo-chatty-preamble-01
+  type: rubric
+  issue_ref: issue-improve-todo-01
+  description: "Verify chatty-preamble improvements: The outputs add conversational\
+    \ intro lines that pollute the intended to\u2011do list content."
+  rubric:
+    criteria:
+    - 'Prompt addresses: opens with a conversational paragraph that pollutes the to-do
+      list output'
+    - 'Prompt addresses: two lines of conversational framing before the actual content'
+    scoring: all_required
+- id: eval-improve-todo-structural-rewrite-02
+  type: rubric
+  issue_ref: issue-improve-todo-02
+  description: "Verify structural-rewrite improvements: The model rewrites the list\
+    \ structure\u2014adding priority groupings or reordering\u2014even though no structural\
+    \ change was requested."
+  rubric:
+    criteria:
+    - 'Prompt addresses: input was ALREADY well-structured with P0-P3 labels and checkboxes
+      but model still replaced the format with its own priority headings'
+    - 'Prompt addresses: original was a flat list with inline notes and model imposed
+      an entirely new priority taxonomy with CRITICAL HIGH MEDIUM LOW headings'
+    - 'Prompt addresses: structure was flattened and re-sorted into priority groups,
+      discarding sub-items and freeform notes that were part of the input'
+    - 'Prompt addresses: input already had per-item P0 P1 P2 P3 tags but model stripped
+      those and created section groupings instead'
+    - 'Prompt addresses: original was a flat dump with no groupings and model invented
+      a priority structure from scratch'
+    scoring: all_required
+- id: eval-improve-todo-formatting-changes-03
+  type: rubric
+  issue_ref: issue-improve-todo-03
+  description: 'Verify formatting-changes improvements: The model changes formatting
+    characters such as checkboxes or dashes to different bullet symbols.'
+  rubric:
+    criteria:
+    - 'Prompt addresses: changed from markdown dashes to bullet point characters'
+    scoring: any_required
+- id: eval-improve-todo-chatbot-signoff-04
+  type: rubric
+  issue_ref: issue-improve-todo-04
+  description: 'Verify chatbot-signoff improvements: The outputs end with unsolicited
+    chatbot-style offers to further transform the list.'
+  rubric:
+    criteria:
+    - 'Prompt addresses: chatbot offer to convert into weekly action plan at the end'
+    - 'Prompt addresses: chatbot sign-off offering to make a daily schedule'
+    - 'Prompt addresses: chatbot offer at the end to break into subtasks'
+    scoring: any_required
+- id: eval-improve-todo-lost-inline-context-05
+  type: rubric
+  issue_ref: issue-improve-todo-05
+  description: 'Verify lost-inline-context improvements: Inline notes or human context
+    present in the original items are removed.'
+  rubric:
+    criteria:
+    - 'Prompt addresses: dropped the inline human context from original items like
+      which is insane and pinged them twice'
+    scoring: any_required
+- id: eval-improve-todo-title-renaming-06
+  type: rubric
+  issue_ref: issue-improve-todo-06
+  description: 'Verify title-renaming improvements: The model renames the user''s
+    original title in a presumptive way.'
+  rubric:
+    criteria:
+    - 'Prompt addresses: kept the original title which is good but renamed it with
+      Revised which is presumptuous'
+    scoring: any_required
