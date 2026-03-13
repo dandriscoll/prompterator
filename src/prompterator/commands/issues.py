@@ -7,7 +7,7 @@ import click
 
 from prompterator.commands.feedback import find_mb_files, parse_mb_file
 from prompterator.config.loader import get_config_base_dir, load_config
-from prompterator.core.issue import consolidate_feedback, save_issue_file
+from prompterator.core.issue import consolidate_feedback, load_issue_file, save_issue_file
 from prompterator.runners.llm import LLMClient
 
 
@@ -46,7 +46,12 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> No
         return
 
     # Initialize LLM client with editor role
+    from prompterator.runners.llm import debug_context
+    debug_context("issues")
     llm_client = LLMClient(**config.resolve_role("editor"))
+
+    # Resolve primary prompt from config if set
+    config_prompt = config.directories.prompt
 
     # Group feedback by prompt reference
     prompt_feedback: dict[str, list] = defaultdict(list)
@@ -54,7 +59,10 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> No
     for path in mb_files:
         try:
             feedback = parse_mb_file(path)
-            if feedback.prompt_ref:
+            if config_prompt:
+                # Config specifies the primary prompt — all feedback maps to it
+                prompt_feedback[config_prompt].append(feedback)
+            elif feedback.prompt_ref:
                 prompt_feedback[feedback.prompt_ref].append(feedback)
             else:
                 # Use filename as key if no prompt ref
@@ -70,20 +78,30 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> No
     # Generate issue files
     created = 0
     for prompt_ref, feedback_list in prompt_feedback.items():
+        # Load existing issues if present
+        base_name = Path(prompt_ref).stem.split(".")[0]
+        issue_path = output / f"{base_name}.issue.yaml"
+
+        existing_issues = None
+        if issue_path.exists():
+            try:
+                existing = load_issue_file(issue_path)
+                existing_issues = existing.issues
+                click.echo(f"  {prompt_ref}: merging with {len(existing_issues)} existing issues")
+            except Exception as e:
+                click.echo(f"  Warning: could not load {issue_path}: {e}", err=True)
+
         issue_file = consolidate_feedback(
             feedback_list,
             prompt_ref,
             llm_client,
             config.feedback.min_occurrences,
+            existing_issues=existing_issues,
         )
 
         if not issue_file.issues:
             click.echo(f"  {prompt_ref}: no issues (below threshold)")
             continue
-
-        # Generate output filename
-        base_name = Path(prompt_ref).stem.split(".")[0]
-        issue_path = output / f"{base_name}.issue.yaml"
 
         if dry_run:
             click.echo(f"  Would create: {issue_path}")

@@ -3,7 +3,63 @@
 import json
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
+
+# Module-level debug state. When enabled, calls are buffered until a run
+# directory is set, then flushed as individual files.
+_debug_enabled: bool = False
+_debug_dir: Path | None = None
+_debug_buffer: list[tuple[str, str | None, str, str]] = []
+_debug_context: str = ""
+_debug_seq: int = 0
+
+
+def enable_debug_log() -> None:
+    """Enable debug logging. Writes to cwd by default; overridden by set_debug_log_dir()."""
+    global _debug_enabled, _debug_dir
+    _debug_enabled = True
+    _debug_dir = Path.cwd()
+
+
+def set_debug_log_dir(directory: Path) -> None:
+    """Set the debug output directory and flush any buffered calls."""
+    global _debug_dir
+    directory.mkdir(parents=True, exist_ok=True)
+    _debug_dir = directory
+    for context, system, prompt, response in _debug_buffer:
+        _write_entry(context, system, prompt, response)
+    _debug_buffer.clear()
+
+
+def debug_context(label: str) -> None:
+    """Set the current debug context label (e.g. 'improve', 'tune.3.eval')."""
+    global _debug_context
+    _debug_context = label
+
+
+def _write_entry(context: str, system: str | None, prompt: str, response: str) -> None:
+    global _debug_seq
+    _debug_seq += 1
+    ctx = context.replace(".", "-") if context else "unknown"
+    filename = f"debug-{_debug_seq:03d}-{ctx}.log"
+    path = _debug_dir / filename
+    with open(path, "w") as f:
+        if system:
+            f.write(f"--- SYSTEM ---\n{system}\n\n")
+        f.write(f"--- INPUT ---\n{prompt}\n\n")
+        f.write(f"--- OUTPUT ---\n{response}\n")
+
+
+def _log_call(system: str | None, prompt: str, response: str) -> None:
+    """Write one LLM call to its own debug file, or buffer it."""
+    if not _debug_enabled:
+        return
+    context = _debug_context
+    if _debug_dir is not None:
+        _write_entry(context, system, prompt, response)
+    else:
+        _debug_buffer.append((context, system, prompt, response))
 
 
 class LLMError(Exception):
@@ -44,7 +100,7 @@ def _find_llm_executable(runner: str) -> str:
     # Custom path
     path = Path(runner)
     if path.exists():
-        return str(path)
+        return str(path.resolve())
 
     # Try PATH
     found = shutil.which(runner)
@@ -135,7 +191,9 @@ class LLMClient:
                 timeout=timeout,
                 check=True,
             )
-            return result.stdout.strip()
+            response = result.stdout.strip()
+            _log_call(system, prompt, response)
+            return response
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr or e.stdout or "Unknown error"
             raise LLMError(f"LLM generation failed: {error_msg}")

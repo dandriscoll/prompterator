@@ -1,13 +1,6 @@
 @source outputs/003-r2.out.md
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
-<<< two lines of conversational framing before the actual content
-
----
-
-@source outputs/003-r2.out.md
-@prior improve-todo.prompt.md
-@prior 003.todoosy.md
 <<< input already had per-item P0 P1 P2 P3 tags but model stripped those and created section groupings instead
 
 ---
@@ -16,10 +9,3 @@
 @prior improve-todo.prompt.md
 @prior 003.todoosy.md
 <<< kept the original title which is good but renamed it with Revised which is presumptuous
-
----
-
-@source outputs/003-r2.out.md
-@prior improve-todo.prompt.md
-@prior 003.todoosy.md
-<<< wording tweaks on individual items are fine

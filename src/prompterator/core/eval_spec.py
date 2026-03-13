@@ -1,9 +1,32 @@
 """Eval specification generation from issues."""
 
+import json
 from pathlib import Path
 
 from prompterator.models.eval import Eval, EvalFile, EvalRubric
 from prompterator.models.issue import IssueFile
+from prompterator.runners.llm import LLMClient
+
+
+_CRITERIA_SYSTEM = (
+    "You convert an issue description into a single evaluation pass-criterion. "
+    "The issue describes a PROBLEM. You produce ONE criterion that checks for "
+    "the ABSENCE of that problem — it should PASS when the problem is gone.\n\n"
+    "Frame the criterion as what the output must NOT contain or do. "
+    "Do not frame it as what the output SHOULD contain — that overspecifies "
+    "and tests for things beyond the original issue.\n\n"
+    "Examples:\n"
+    '  Issue: "Output includes conversational filler phrases"\n'
+    '  Criterion: "Output contains no conversational filler phrases"\n\n'
+    '  Issue: "Output adds an unwanted preamble before the list"\n'
+    '  Criterion: "Output does not begin with a preamble or introduction"\n\n'
+    '  Issue: "Output contains incorrect arithmetic"\n'
+    '  Criterion: "Output does not contain incorrect arithmetic"\n\n'
+    "Stay focused on the specific issue. Do not add criteria for problems "
+    "that were not raised.\n\n"
+    "Output ONLY a JSON array containing exactly one string. "
+    "Do not wrap in markdown fences."
+)
 
 
 # Mapping of issue categories to evaluation criteria
@@ -45,16 +68,25 @@ def _generate_eval_id(prompt_ref: str, category: str, index: int) -> str:
 _MAX_CRITERIA_PER_ISSUE = 5
 
 
-def _criteria_from_evidence(issue) -> list[str]:
-    """Extract specific eval criteria from issue evidence.
+def _criteria_from_issue(issue, llm_client: LLMClient | None = None) -> list[str]:
+    """Generate eval pass-criteria from an issue.
 
-    Evidence feedback is now free-form text. Each piece of evidence
-    becomes a candidate criterion.  Deduplicates semantically
-    overlapping entries so that the resulting criteria list stays
-    tractable (capped at ``_MAX_CRITERIA_PER_ISSUE``).
+    Uses the LLM to invert the issue (problem description) into
+    desired-state criteria that pass when the problem is fixed.
+    Falls back to evidence-derived criteria when no LLM is available.
     """
-    details: list[str] = []
+    if llm_client is not None:
+        try:
+            raw = llm_client.generate(issue.summary, system=_CRITERIA_SYSTEM)
+            criteria = json.loads(raw)
+            if isinstance(criteria, list) and criteria:
+                return [str(c) for c in criteria[:1]]
+        except (json.JSONDecodeError, Exception):
+            # Fall through to heuristic
+            pass
 
+    # Fallback: derive from raw evidence
+    details: list[str] = []
     for ev in issue.evidence:
         if ev.feedback:
             details.append(ev.feedback)
@@ -135,11 +167,15 @@ def _deduplicate_details(details: list[str]) -> list[str]:
     return [text for text, _words in kept]
 
 
-def generate_evals_from_issues(issue_file: IssueFile) -> EvalFile:
+def generate_evals_from_issues(
+    issue_file: IssueFile,
+    llm_client: LLMClient | None = None,
+) -> EvalFile:
     """Generate evaluation specifications from issues.
 
     Args:
         issue_file: IssueFile containing issues to address.
+        llm_client: Optional LLM client for generating inverted pass-criteria.
 
     Returns:
         EvalFile with generated evaluations.
@@ -150,9 +186,9 @@ def generate_evals_from_issues(issue_file: IssueFile) -> EvalFile:
     for issue in issue_file.issues:
         category = issue.category.lower()
 
-        # Prefer feedback-specific criteria derived from evidence details.
-        # Fall back to generic category criteria when no details are available.
-        specific_criteria = _criteria_from_evidence(issue)
+        # Use LLM to invert issue descriptions into pass-criteria.
+        # Falls back to generic category criteria when no LLM or no details.
+        specific_criteria = _criteria_from_issue(issue, llm_client)
         if specific_criteria:
             criteria = specific_criteria
         else:

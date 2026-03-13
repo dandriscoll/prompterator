@@ -1,10 +1,8 @@
 """Tests for prompt improvement logic."""
 
-import json
-
 from prompterator.core.improver import (
-    _build_improvement_prompt,
-    _parse_improvement_response,
+    _apply_edit,
+    _build_edit_prompt,
     generate_improved_prompt_with_rationale,
 )
 from prompterator.models.result import EvalResult
@@ -12,63 +10,91 @@ from prompterator.models.result import EvalResult
 from tests.conftest import MockLLMClient
 
 
-def test_build_improvement_prompt_structure(sample_issue_file):
-    """Improvement prompt includes issues and instructions."""
-    prompt = _build_improvement_prompt("Original text", sample_issue_file)
+def test_build_edit_prompt_structure(sample_issue_file):
+    """Edit prompt includes the prompt text and issues."""
+    prompt = _build_edit_prompt("Original text", sample_issue_file)
     assert "Original text" in prompt
     assert "unclear-instructions" in prompt
     assert "missing-examples" in prompt
-    assert "ALL" in prompt or "all failing issues" in prompt.lower()
 
 
-def test_surgical_prompt_includes_rationale(sample_issue_file):
-    """Prompt requests JSON with rationale field."""
-    prompt = _build_improvement_prompt("Original text", sample_issue_file)
-    assert "rationale" in prompt
-    assert "improved_prompt" in prompt
-
-
-def test_build_improvement_prompt_with_eval_results(sample_issue_file):
+def test_build_edit_prompt_with_eval_results(sample_issue_file):
     """Eval results are included when provided."""
     results = [
         EvalResult(eval_id="eval-01", passed=False, score=0.33, details="Needs work"),
     ]
-    prompt = _build_improvement_prompt("Original", sample_issue_file, eval_results=results, iteration=2)
+    prompt = _build_edit_prompt("Original", sample_issue_file, eval_results=results, iteration=2)
     assert "eval-01" in prompt
     assert "ITERATION: 2" in prompt
 
 
-def test_parse_improvement_response_json():
-    """Valid JSON response is parsed correctly."""
-    response = json.dumps({
-        "rationale": "Clarified instructions",
-        "changed_section": "Opening paragraph",
-        "improved_prompt": "Better prompt text",
-    })
-    rationale, improved = _parse_improvement_response(response)
-    assert rationale == "Clarified instructions"
-    assert improved == "Better prompt text"
+def test_apply_edit_replace():
+    """REPLACE action finds and replaces text."""
+    original = "You are a helpful assistant.\n\nBe concise."
+    response = (
+        "RATIONALE: Add greeting prohibition\n"
+        "ACTION: REPLACE\n"
+        "FIND: Be concise.\n"
+        "REPLACE_WITH: Be concise. Do not begin with a greeting."
+    )
+    edited, rationale = _apply_edit(original, response)
+    assert "Do not begin with a greeting" in edited
+    assert "Be concise" in edited
+    assert "Add greeting prohibition" in rationale
 
 
-def test_parse_improvement_response_fallback():
-    """Non-JSON response falls back to treating it as the prompt."""
-    response = "Just a plain improved prompt"
-    rationale, improved = _parse_improvement_response(response)
-    assert improved == "Just a plain improved prompt"
+def test_apply_edit_append():
+    """APPEND action adds text at the end."""
+    original = "You are a helpful assistant."
+    response = (
+        "RATIONALE: Add constraint\n"
+        "ACTION: APPEND\n"
+        "APPEND_TEXT: Never use emojis."
+    )
+    edited, rationale = _apply_edit(original, response)
+    assert edited.endswith("Never use emojis.")
+    assert "You are a helpful assistant." in edited
 
 
-def test_generate_improved_prompt_with_rationale(sample_issue_file):
-    """Full generation returns improved text, rationale, and raw output."""
-    llm_response = json.dumps({
-        "rationale": "Added examples",
-        "changed_section": "Body",
-        "improved_prompt": "Improved prompt with examples",
-    })
+def test_apply_edit_prepend():
+    """PREPEND action adds text at the beginning."""
+    original = "Be concise."
+    response = (
+        "RATIONALE: Add role\n"
+        "ACTION: PREPEND\n"
+        "PREPEND_TEXT: You are an expert editor."
+    )
+    edited, rationale = _apply_edit(original, response)
+    assert edited.startswith("You are an expert editor.")
+    assert "Be concise." in edited
+
+
+def test_apply_edit_find_not_matched():
+    """Falls back to append when FIND text doesn't match."""
+    original = "You are a helpful assistant."
+    response = (
+        "RATIONALE: Fix something\n"
+        "ACTION: REPLACE\n"
+        "FIND: This text does not exist in the prompt at all\n"
+        "REPLACE_WITH: New text here"
+    )
+    edited, rationale = _apply_edit(original, response)
+    assert "New text here" in edited
+    assert "appended instead" in rationale
+
+
+def test_generate_structured_edit(sample_issue_file):
+    """Full generation with structured edit."""
+    llm_response = (
+        "RATIONALE: Prohibit greetings to pass eval\n"
+        "ACTION: APPEND\n"
+        "APPEND_TEXT: Do not begin your response with a greeting."
+    )
     llm = MockLLMClient(responses=[llm_response])
 
     improved, rationale, raw = generate_improved_prompt_with_rationale(
-        "Original prompt", sample_issue_file, llm, iteration=1
+        "You are a helpful assistant.", sample_issue_file, llm, iteration=1
     )
-    assert improved == "Improved prompt with examples"
-    assert rationale == "Added examples"
-    assert raw == llm_response
+    assert "Do not begin your response with a greeting." in improved
+    assert "You are a helpful assistant." in improved
+    assert "Prohibit greetings" in rationale

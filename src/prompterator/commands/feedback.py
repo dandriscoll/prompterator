@@ -97,8 +97,8 @@ def parse_mb_file(path: Path) -> Feedback:
 
 
 def find_mb_files(directory: Path) -> list[Path]:
-    """Find all .mb files in a directory."""
-    return sorted(directory.glob("*.mb"))
+    """Find all .mb files in a directory and its subdirectories."""
+    return sorted(directory.glob("**/*.mb"))
 
 
 @click.command("feedback")

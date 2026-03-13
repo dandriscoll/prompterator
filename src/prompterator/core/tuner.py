@@ -6,12 +6,13 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from prompterator.core.eval_runner import run_all_evals
+from prompterator.core.eval_runner import run_all_evals, save_result_file
 from prompterator.core.improver import generate_improved_prompt_with_rationale
+from prompterator.runners.llm import debug_context
 from prompterator.models.eval import EvalFile
 from prompterator.models.issue import IssueFile
 from prompterator.models.iteration import IterationRecord, PromptDiff, TuneReport
-from prompterator.models.result import ResultSummary
+from prompterator.models.result import ResultFile, ResultSummary
 from prompterator.runners.llm import LLMClient
 
 
@@ -20,10 +21,13 @@ def _run_evals_on_text(
     eval_file: EvalFile,
     critic_llm: LLMClient | None,
     *,
+    author_llm: LLMClient | None = None,
+    samples: int = 1,
+    confidence_threshold: float = 0.90,
     script: str | None = None,
     script_timeout: int = 60,
 ) -> tuple[list, ResultSummary]:
-    """Run evals on prompt text by writing to a temp file.
+    """Generate output from prompt text and evaluate it.
 
     Returns:
         Tuple of (eval_results, summary).
@@ -35,6 +39,9 @@ def _run_evals_on_text(
     try:
         result_file = run_all_evals(
             eval_file, tmp_path, critic_llm,
+            author_llm=author_llm,
+            samples=samples,
+            confidence_threshold=confidence_threshold,
             script=script, script_timeout=script_timeout,
         )
     finally:
@@ -81,12 +88,16 @@ def run_tuning_loop(
     editor_llm: LLMClient,
     critic_llm: LLMClient | None = None,
     max_iterations: int = 20,
-    output_dir: Path | None = None,
     on_iteration: Callable | None = None,
     *,
+    author_llm: LLMClient | None = None,
+    samples: int = 1,
+    confidence_threshold: float = 0.90,
     critic_script: str | None = None,
     critic_script_timeout: int = 60,
-    patience: int = 2,
+    patience: int = 5,
+    early_stop: bool = False,
+    results_dir: Path | None = None,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -108,36 +119,88 @@ def run_tuning_loop(
         original_text = f.read()
 
     current_text = original_text
+    best_text = original_text
     iterations: list[IterationRecord] = []
+    edit_history: list[dict] = []
+    base_name = prompt_path.stem.split(".")[0]
+
+    # Set up results run directory
+    if results_dir is not None:
+        from prompterator.core.run import create_run_dir
+
+        run_dir = create_run_dir(results_dir)
+    else:
+        run_dir = None
 
     # Run baseline evals
+    debug_context("tune.baseline.eval")
     baseline_results, baseline_summary = _run_evals_on_text(
         current_text, eval_file, critic_llm,
+        author_llm=author_llm,
+        samples=samples, confidence_threshold=confidence_threshold,
         script=critic_script, script_timeout=critic_script_timeout,
     )
     previous_results = baseline_results
-    previous_score = baseline_summary.overall_score
-    best_score = previous_score
+    best_score = baseline_summary.overall_score
+    best_results = baseline_results
     stall_count = 0
 
     for i in range(1, max_iterations + 1):
         # Generate improvement
-        improved_text, rationale, raw_output = generate_improved_prompt_with_rationale(
+        debug_context(f"tune.{i}.improve")
+        improved_text, rationale, raw_output, edit_action = generate_improved_prompt_with_rationale(
             current_text, issue_file, editor_llm,
             eval_results=previous_results, iteration=i,
+            edit_history=edit_history,
+            stall_count=stall_count,
         )
+
+        # If the edit didn't change the prompt, record and skip eval
+        if improved_text == current_text:
+            edit_history.append({
+                "rationale": rationale,
+                "action": edit_action,
+                "accepted": False,
+            })
+            # Build a minimal record for the iteration
+            diff = PromptDiff(before=current_text, after=current_text)
+            record = IterationRecord(
+                iteration=i,
+                prompt_text=current_text,
+                rationale=rationale + " (no change)",
+                diff=diff,
+                eval_results=previous_results,
+                summary=ResultSummary(
+                    verdict="FAIL",
+                    overall_score=best_score,
+                    passed=sum(1 for r in previous_results if r.passed),
+                    total=len(previous_results),
+                ),
+                metric_deltas={},
+                l2_output=raw_output,
+            )
+            iterations.append(record)
+            if on_iteration:
+                on_iteration(record)
+            stall_count += 1
+            if stall_count >= patience and i > 1:
+                break
+            continue
 
         # Build diff
         diff = PromptDiff(before=current_text, after=improved_text)
 
         # Run evals on improved prompt
+        debug_context(f"tune.{i}.eval")
         new_results, new_summary = _run_evals_on_text(
             improved_text, eval_file, critic_llm,
+            author_llm=author_llm,
+            samples=samples, confidence_threshold=confidence_threshold,
             script=critic_script, script_timeout=critic_script_timeout,
         )
 
         # Compute deltas
-        metric_deltas = _compute_metric_deltas(new_results, previous_results)
+        metric_deltas = _compute_metric_deltas(new_results, best_results)
 
         # Build iteration record
         record = IterationRecord(
@@ -155,39 +218,75 @@ def run_tuning_loop(
         if on_iteration:
             on_iteration(record)
 
-        # Check termination: all pass
-        if new_summary.verdict == "PASS":
+        # Save per-iteration results
+        if run_dir is not None:
+            result_file = ResultFile(
+                prompt_tested=str(prompt_path),
+                results=new_results,
+                summary=new_summary,
+            )
+            save_result_file(result_file, run_dir / f"{base_name}.{i:03d}.results.yaml")
+
+        # Accept or reject: only move forward if score improved
+        accepted = new_summary.overall_score >= best_score
+        edit_history.append({
+            "rationale": rationale,
+            "action": edit_action,
+            "accepted": accepted,
+        })
+
+        # Use a noise margin so small score fluctuations from low sample
+        # counts don't cause false stalls or false improvements.
+        noise_margin = 0.5 / max(len(new_results), 1)
+
+        if new_summary.overall_score > best_score + noise_margin:
+            # Clear improvement beyond noise
+            best_score = new_summary.overall_score
+            best_text = improved_text
+            best_results = new_results
             current_text = improved_text
             previous_results = new_results
-            previous_score = new_summary.overall_score
-            break
-
-        # Track stalls (no improvement over best score)
-        if new_summary.overall_score > best_score:
-            best_score = new_summary.overall_score
             stall_count = 0
-        else:
+
+            # Write improved prompt to source file
+            with open(prompt_path, "w") as f:
+                f.write(improved_text)
+        elif new_summary.overall_score >= best_score - noise_margin:
+            # Within noise band — accept to explore but don't update best
+            current_text = improved_text
+            previous_results = new_results
+            if new_summary.overall_score > best_score:
+                best_score = new_summary.overall_score
+                best_text = improved_text
+                best_results = new_results
+                with open(prompt_path, "w") as f:
+                    f.write(improved_text)
             stall_count += 1
+        else:
+            # Clear regression — revert to best prompt
+            current_text = best_text
+            previous_results = best_results
+            stall_count += 1
+
+        # Check termination: all pass
+        if new_summary.verdict == "PASS":
+            best_text = improved_text
+            best_results = new_results
+            break
 
         # Check termination: patience exhausted
         if stall_count >= patience and i > 1:
             break
 
-        # Continue
-        current_text = improved_text
-        previous_results = new_results
-        previous_score = new_summary.overall_score
-
-    # Use the best iteration's prompt as final
-    if iterations:
-        best = max(iterations, key=lambda r: r.summary.overall_score)
-        final_text = best.prompt_text
-        final_summary = best.summary
-        final_results = best.eval_results
-    else:
-        final_text = original_text
+    # Use the best prompt tracked during the loop
+    final_text = best_text
+    final_results = best_results
+    # Find the summary for the best results
+    if best_results is baseline_results:
         final_summary = baseline_summary
-        final_results = baseline_results
+    else:
+        best_iter = [r for r in iterations if r.prompt_text == best_text]
+        final_summary = best_iter[-1].summary if best_iter else baseline_summary
 
     metric_table = _build_metric_table(baseline_results, final_results)
 
@@ -200,18 +299,16 @@ def run_tuning_loop(
         metric_table=metric_table,
     )
 
-    # Save outputs if output_dir specified
-    if output_dir:
+    # Save outputs
+    if run_dir is not None:
         import yaml
 
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        report_path = output_dir / "tune-report.yaml"
+        report_path = run_dir / "tune-report.yaml"
         with open(report_path, "w") as f:
             yaml.dump(report.to_yaml_dict(), f, default_flow_style=False, sort_keys=False)
 
-        final_path = output_dir / prompt_path.name
-        with open(final_path, "w") as f:
-            f.write(final_text)
+    # Always write the best prompt back to the source file
+    with open(prompt_path, "w") as f:
+        f.write(final_text)
 
     return report

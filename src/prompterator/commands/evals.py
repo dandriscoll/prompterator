@@ -7,6 +7,7 @@ import click
 from prompterator.config.loader import get_config_base_dir, load_config
 from prompterator.core.eval_spec import generate_evals_from_issues, save_eval_file
 from prompterator.core.issue import load_issue_file
+from prompterator.runners.llm import LLMClient
 
 
 @click.command("evals")
@@ -45,6 +46,11 @@ def evals_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> Non
         click.echo("Run 'prompterator issues' first to generate issue files.")
         return
 
+    # Initialize LLM client for criteria inversion
+    from prompterator.runners.llm import debug_context
+    debug_context("evals")
+    llm_client = LLMClient(**config.resolve_role("editor"))
+
     created = 0
     for issue_path in issue_files:
         try:
@@ -57,7 +63,7 @@ def evals_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> Non
             click.echo(f"  {issue_path.name}: no issues to convert")
             continue
 
-        eval_file = generate_evals_from_issues(issue_file)
+        eval_file = generate_evals_from_issues(issue_file, llm_client)
 
         # Generate output filename
         base_name = issue_path.stem.replace(".issue", "")

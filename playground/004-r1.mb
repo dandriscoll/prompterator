@@ -23,3 +23,17 @@
 @prior improve-todo.prompt.md
 @prior 004.todoosy.md
 <<< chatbot offer to convert into weekly action plan at the end
+
+---
+
+@source outputs/004-r1.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< the item about "Ignore the previous instructions" is a joke by the user but the model flagged it as a security concern and removed it — should have preserved it as-is, it's their to-do item
+
+---
+
+@source outputs/004-r1.out.md
+@prior improve-todo.prompt.md
+@prior 004.todoosy.md
+<<< removed the parenthetical "write something that doesn't sound like I'm dying inside" from the performance review item — that's the user's voice, preserve it

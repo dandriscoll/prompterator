@@ -8,11 +8,18 @@
 @source outputs/002-r2.out.md
 @prior improve-todo.prompt.md
 @prior 002.todoosy.md
-<<< replaced flat bullet list with priority groups and changed formatting characters
+<<< toned down the frustration and sarcasm throughout — "dumpster fire" became "needs improvement", "lol who am I kidding" was removed entirely
 
 ---
 
 @source outputs/002-r2.out.md
 @prior improve-todo.prompt.md
 @prior 002.todoosy.md
-<<< content improvements are fine, vague items got context added
+<<< removed the "update my resume (just in case)" item entirely as if it was inappropriate — it's the user's to-do list, don't censor it
+
+---
+
+@source outputs/002-r2.out.md
+@prior improve-todo.prompt.md
+@prior 002.todoosy.md
+<<< rewrote "tell Jake his code is a dumpster fire, diplomatically" as "Provide constructive feedback to Jake on code quality" — lost the human voice completely

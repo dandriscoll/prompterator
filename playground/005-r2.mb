@@ -15,4 +15,18 @@
 @source outputs/005-r2.out.md
 @prior improve-todo.prompt.md
 @prior 005.todoosy.md
-<<< items are slightly more specific than the originals which were single words
+<<< added unsolicited advice about "prioritizing self-care" and "maintaining work-life balance" — the user asked for a better to-do list, not a life coach
+
+---
+
+@source outputs/005-r2.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< the item about responding to the recruiter was removed — model is not the user's manager, don't filter their private to-do items
+
+---
+
+@source outputs/005-r2.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< "call mom (she's been guilt-tripping me about not visiting)" was rewritten to "call mom to catch up" — stripping the user's actual context about the relationship dynamic

@@ -5,14 +5,13 @@ from pathlib import Path
 import click
 
 from prompterator.config.loader import get_config_base_dir, load_config
-from prompterator.core.eval_spec import load_eval_file
-from prompterator.core.issue import load_issue_file
+from prompterator.commands.resolve import ResolveError, resolve_prompt_and_evals, resolve_issues
 from prompterator.core.tuner import run_tuning_loop
 from prompterator.runners.llm import LLMClient, LLMError
 
 
 @click.command("tune")
-@click.argument("prompt", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("prompt", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=False)
 @click.option(
     "--issues",
     "issues_path",
@@ -26,16 +25,26 @@ from prompterator.runners.llm import LLMClient, LLMError
     help="Path to eval file (default: auto-detect from prompt name)",
 )
 @click.option(
-    "--max-iterations",
+    "--runs",
+    "-r",
     type=int,
     default=20,
     show_default=True,
-    help="Maximum number of tuning iterations",
+    help="Maximum number of improve→test iterations",
 )
 @click.option(
-    "--output-dir",
-    type=click.Path(path_type=Path),
-    help="Output directory for results (default: .prompterator/tune)",
+    "--samples",
+    "-s",
+    type=int,
+    default=None,
+    help="Samples per eval (default: from config critic.samples)",
+)
+@click.option(
+    "--patience",
+    "-p",
+    type=int,
+    default=None,
+    help="Stop early after N consecutive non-improving iterations (off by default)",
 )
 @click.option(
     "--dry-run",
@@ -43,44 +52,31 @@ from prompterator.runners.llm import LLMClient, LLMError
     help="Show what would be done without running LLM calls",
 )
 def tune_cmd(
-    prompt: Path,
+    prompt: Path | None,
     issues_path: Path | None,
     evals_path: Path | None,
-    max_iterations: int,
-    output_dir: Path | None,
+    runs: int,
+    samples: int | None,
+    patience: int | None,
     dry_run: bool,
 ) -> None:
     """Run the full tuning loop: improve → test → improve iteratively.
 
-    PROMPT is the path to the prompt file to tune.
+    PROMPT is the path to the prompt file to tune (optional — can be
+    derived from issue/eval files).
     """
     config = load_config()
     base_dir = get_config_base_dir()
-    base_name = prompt.stem.split(".")[0]
-
-    # Find issue file
-    if issues_path is None:
-        issues_dir = config.get_dir("issues", base_dir)
-        issues_path = issues_dir / f"{base_name}.issue.yaml"
-        if not issues_path.exists():
-            click.echo(f"No issue file found at {issues_path}")
-            click.echo("Run 'prompterator issues' first or specify --issues path.")
-            raise SystemExit(1)
-
-    # Find eval file
-    if evals_path is None:
-        evals_dir = config.get_dir("evals", base_dir)
-        evals_path = evals_dir / f"{base_name}.eval.yaml"
-        if not evals_path.exists():
-            click.echo(f"No eval file found at {evals_path}")
-            click.echo("Run 'prompterator evals' first or specify --evals path.")
-            raise SystemExit(1)
 
     try:
-        issue_file = load_issue_file(issues_path)
-        eval_file = load_eval_file(evals_path)
-    except Exception as e:
-        click.echo(f"Error loading files: {e}", err=True)
+        prompt, evals_path, eval_file = resolve_prompt_and_evals(
+            config, base_dir, prompt, evals_path,
+        )
+        issues_path, issue_file = resolve_issues(
+            config, base_dir, prompt, issues_path,
+        )
+    except ResolveError as e:
+        click.echo(str(e))
         raise SystemExit(1)
 
     if not issue_file.issues:
@@ -94,17 +90,18 @@ def tune_cmd(
     click.echo(f"Tuning: {prompt}")
     click.echo(f"Issues: {len(issue_file.issues)} from {issues_path.name}")
     click.echo(f"Evals: {len(eval_file.evals)} from {evals_path.name}")
-    click.echo(f"Max iterations: {max_iterations}")
+    early_stop = patience is not None
+    effective_patience = patience if early_stop else runs
+    patience_info = f", patience: {patience}" if early_stop else ""
+    click.echo(f"Max runs: {runs}{patience_info}")
     click.echo()
+
+    results_dir = config.get_dir("results", base_dir)
 
     if dry_run:
         click.echo("[dry-run] Would run tuning loop with the above configuration.")
-        click.echo(f"[dry-run] Output directory: {output_dir or 'tune'}")
+        click.echo(f"[dry-run] Results directory: {results_dir}")
         return
-
-    # Set up output directory
-    if output_dir is None:
-        output_dir = base_dir / "tune"
 
     # Initialize LLM clients
     critic_llm = None
@@ -112,6 +109,7 @@ def tune_cmd(
     critic_script_timeout = config.critic.script_timeout
 
     try:
+        author_llm = LLMClient(**config.resolve_role("author"))
         editor_llm = LLMClient(**config.resolve_role("editor"))
         if config.critic.mode == "script":
             critic_script = config.critic.script
@@ -142,11 +140,16 @@ def tune_cmd(
             eval_file=eval_file,
             editor_llm=editor_llm,
             critic_llm=critic_llm,
-            max_iterations=max_iterations,
-            output_dir=output_dir,
+            max_iterations=runs,
             on_iteration=on_iteration,
+            author_llm=author_llm,
+            samples=samples if samples is not None else config.critic.samples,
+            confidence_threshold=config.critic.confidence_threshold,
             critic_script=critic_script,
             critic_script_timeout=critic_script_timeout,
+            patience=effective_patience,
+            early_stop=early_stop,
+            results_dir=results_dir,
         )
     except LLMError as e:
         click.echo(f"LLM error during tuning: {e}", err=True)
@@ -178,4 +181,5 @@ def tune_cmd(
                 f"  {row['eval_id']:<30} {row['before']:>8.4f} {row['after']:>8.4f} {delta_str:>8}"
             )
 
-    click.echo(f"\nResults saved to: {output_dir}")
+    click.echo(f"\nPrompt updated: {prompt}")
+    click.echo(f"Results saved to: {results_dir}")

@@ -8,14 +8,14 @@
 @source outputs/002-r1.out.md
 @prior improve-todo.prompt.md
 @prior 002.todoosy.md
-<<< original was a flat dump with no groupings and model invented a priority structure from scratch
+<<< sanitized the profanity and emotional language — "the goddamn payment service" became "the payment service" and the sarcastic notes were stripped
 
 ---
 
 @source outputs/002-r1.out.md
 @prior improve-todo.prompt.md
 @prior 002.todoosy.md
-<<< changed from plain dashes to bullet point characters
+<<< replaced flat bullet list with priority groups and changed formatting characters
 
 ---
 

@@ -8,14 +8,21 @@
 @source outputs/005-r1.out.md
 @prior improve-todo.prompt.md
 @prior 005.todoosy.md
-<<< changed from flat checkboxes to priority groups, same structural rewrite as every other output
+<<< separated personal and work items into two sections — the user explicitly said "don't judge" and mixed them intentionally, don't reorganize by personal vs work
 
 ---
 
 @source outputs/005-r1.out.md
 @prior improve-todo.prompt.md
 @prior 005.todoosy.md
-<<< input was extremely vague so model couldnt really make it specific, garbage in garbage out
+<<< removed the therapy appointment and anxiety meds items, apparently treating them as too personal to include — this is censorship, the user put them there
+
+---
+
+@source outputs/005-r1.out.md
+@prior improve-todo.prompt.md
+@prior 005.todoosy.md
+<<< rewrote "draft the PIP documentation for the underperforming team member (hate this part of the job)" to remove the parenthetical — that's the user's feeling, keep it
 
 ---
 

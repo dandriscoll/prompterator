@@ -14,7 +14,11 @@ _CLUSTER_SYSTEM = (
     "underlying problem they describe. Ignore positive observations (praise, approval, "
     "things that are fine). Output ONLY a JSON array of clusters. Each cluster has:\n"
     '  "label": a short kebab-case tag (e.g. "preamble-insertion", "structural-rewrite"),\n'
-    '  "summary": one sentence describing the problem,\n'
+    '  "summary": one sentence distilling the underlying problem into an actionable '
+    "description. Do NOT echo the user's words — diagnose the root cause and describe "
+    "what specifically needs to change (e.g. instead of 'The text is too chatty' write "
+    "'Output includes conversational filler phrases and unnecessary qualifiers that "
+    "dilute the substantive content'),\n"
     '  "evidence_indices": list of 0-based indices into the input observations.\n'
     "Do not wrap the JSON in markdown fences."
 )
@@ -46,20 +50,38 @@ def consolidate_feedback(
     prompt_ref: str,
     llm_client: LLMClient,
     min_occurrences: int = 1,
+    existing_issues: list[Issue] | None = None,
 ) -> IssueFile:
     """Consolidate multiple feedback entries into issues via LLM clustering.
+
+    When existing_issues are provided, the LLM merges new feedback into
+    the existing issue structure — updating, splitting, or creating new
+    issues as needed rather than starting from scratch.
 
     Args:
         feedback_list: List of parsed feedback objects.
         prompt_ref: Reference to the prompt file.
         llm_client: LLM client for clustering.
         min_occurrences: Minimum evidence count to keep an issue.
+        existing_issues: Previously identified issues to merge with.
 
     Returns:
         IssueFile with consolidated issues.
     """
-    # 1. Collect all (source_file, text) pairs
+    # 1. Collect all observations: existing evidence + new feedback
     observations: list[tuple[str, str]] = []
+
+    # Include evidence from existing issues so the LLM can re-cluster everything
+    if existing_issues:
+        seen: set[tuple[str, str]] = set()
+        for issue in existing_issues:
+            for ev in issue.evidence:
+                key = (ev.source, ev.feedback)
+                if key not in seen:
+                    seen.add(key)
+                    observations.append(key)
+
+    # Add new feedback
     for feedback in feedback_list:
         for entry in feedback.entries:
             observations.append((feedback.source_file, entry.text))
@@ -71,6 +93,7 @@ def consolidate_feedback(
     lines = []
     for idx, (source, text) in enumerate(observations):
         lines.append(f"[{idx}] ({source}) {text}")
+
     user_prompt = "\n".join(lines)
 
     # 3. Ask the LLM to cluster
@@ -89,7 +112,7 @@ def consolidate_feedback(
             clusters = []
 
     # 4. Build issues from clusters
-    total_sources = len(feedback_list)
+    total_sources = len({source for source, _ in observations})
     issues: list[Issue] = []
     issue_index = 1
 

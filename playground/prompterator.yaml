@@ -1,11 +1,12 @@
 version: "1.0"
 
 directories:
+  prompt: null  # set to your primary prompt file, e.g. "my-prompt.prompt.txt"
   prompts: "."
   feedback: "."
   issues: "issues"
   evals: "evals"
-  results: "results"
+  results: "."
 
 # ── LLM Connection Stacks ──────────────────────────────────────────
 # ADMIN: Replace the placeholder values below with real LLM endpoints
@@ -46,6 +47,8 @@ critic:
   temperature: 0.3
   max_tokens: 4096
   mode: "llm"
+  samples: 3
+  confidence_threshold: 0.90
 
 feedback:
   min_occurrences: 1

@@ -11,9 +11,10 @@ class DirectoriesConfig(BaseModel):
 
     prompts: str = Field(default=".", description="Directory for prompt files")
     feedback: str = Field(default=".", description="Directory for feedback files")
-    issues: str = Field(default="issues", description="Directory for issue files")
-    evals: str = Field(default="evals", description="Directory for eval files")
-    results: str = Field(default="results", description="Directory for result files")
+    issues: str = Field(default=".", description="Directory for issue files")
+    evals: str = Field(default=".", description="Directory for eval files")
+    results: str = Field(default=".", description="Directory for result files")
+    prompt: str | None = Field(default=None, description="Path to the primary prompt file")
 
 
 class StackConfig(BaseModel):
@@ -101,6 +102,17 @@ class CriticConfig(LLMRoleConfig):
         description="Timeout in seconds for script execution",
     )
     temperature: float = Field(default=0.3, ge=0.0, le=2.0, description="Sampling temperature")
+    samples: int = Field(
+        default=3,
+        ge=1,
+        description="Number of eval samples per test run",
+    )
+    confidence_threshold: float = Field(
+        default=0.90,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of samples that must pass for an eval to be considered passing",
+    )
 
     @model_validator(mode="after")
     def _validate_script_mode(self) -> "CriticConfig":
@@ -217,6 +229,7 @@ class Config(BaseModel):
         return {
             "version": self.version,
             "directories": {
+                **({"prompt": self.directories.prompt} if self.directories.prompt else {}),
                 "prompts": self.directories.prompts,
                 "feedback": self.directories.feedback,
                 "issues": self.directories.issues,
@@ -234,6 +247,8 @@ class Config(BaseModel):
                 "mode": self.critic.mode,
                 **({"script": self.critic.script} if self.critic.script else {}),
                 **({"script_timeout": self.critic.script_timeout} if self.critic.script_timeout != 60 else {}),
+                "samples": self.critic.samples,
+                "confidence_threshold": self.critic.confidence_threshold,
             },
             "feedback": {
                 "min_occurrences": self.feedback.min_occurrences,

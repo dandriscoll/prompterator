@@ -4,63 +4,58 @@ issues:
 - id: issue-improve-todo-01
   category: chatty-preamble
   severity: high
-  summary: "The outputs add conversational intro lines that pollute the intended to\u2011\
-    do list content."
+  summary: "The outputs add conversational intro lines that pollute the intended to\u2011do
+    list content."
   evidence:
-  - source: /workspace/playground/001-r1.mb
+  - source: 001-r1.mb
     feedback: opens with a conversational paragraph that pollutes the to-do list output
-  - source: /workspace/playground/001-r2.mb
+  - source: 001-r2.mb
     feedback: chatty preamble before the list content
-  - source: /workspace/playground/002-r1.mb
+  - source: 002-r1.mb
     feedback: conversational intro sentence before the actual list
-  - source: /workspace/playground/002-r2.mb
+  - source: 002-r2.mb
     feedback: same preamble problem as every other output
-  - source: /workspace/playground/003-r1.mb
+  - source: 003-r1.mb
     feedback: preamble sentence at the top of the output
-  - source: /workspace/playground/003-r2.mb
-    feedback: two lines of conversational framing before the actual content
-  - source: /workspace/playground/004-r1.mb
+  - source: 004-r1.mb
     feedback: three lines of preamble that would show up in the rendered to-do list
-  - source: /workspace/playground/004-r2.mb
+  - source: 004-r2.mb
     feedback: conversational preamble
-  - source: /workspace/playground/005-r1.mb
+  - source: 005-r1.mb
     feedback: preamble sentence at top
-  - source: /workspace/playground/005-r2.mb
+  - source: 005-r2.mb
     feedback: conversational intro present
 - id: issue-improve-todo-02
   category: structural-rewrite
   severity: high
-  summary: "The model rewrites the list structure\u2014adding priority groupings or\
-    \ reordering\u2014even though no structural change was requested."
+  summary: "The model rewrites the list structure\u2014adding priority groupings or
+    reordering\u2014even though no structural change was requested."
   evidence:
-  - source: /workspace/playground/001-r1.mb
-    feedback: "replaced markdown checkboxes with priority-grouped sections \u2014\
-      \ structural rewrite not requested"
-  - source: /workspace/playground/001-r2.mb
+  - source: 001-r1.mb
+    feedback: replaced markdown checkboxes with priority-grouped sections — structural
+      rewrite not requested
+  - source: 001-r2.mb
     feedback: dropped checkbox format and reorganized into priority tiers that werent
       in the original
-  - source: /workspace/playground/002-r1.mb
-    feedback: original was a flat dump with no groupings and model invented a priority
-      structure from scratch
-  - source: /workspace/playground/002-r2.mb
+  - source: 002-r1.mb
     feedback: replaced flat bullet list with priority groups and changed formatting
       characters
-  - source: /workspace/playground/003-r1.mb
+  - source: 003-r1.mb
     feedback: input was ALREADY well-structured with P0-P3 labels and checkboxes but
       model still replaced the format with its own priority headings
-  - source: /workspace/playground/003-r2.mb
+  - source: 003-r2.mb
     feedback: input already had per-item P0 P1 P2 P3 tags but model stripped those
       and created section groupings instead
-  - source: /workspace/playground/004-r1.mb
+  - source: 004-r1.mb
     feedback: original was a flat list with inline notes and model imposed an entirely
       new priority taxonomy with CRITICAL HIGH MEDIUM LOW headings
-  - source: /workspace/playground/004-r2.mb
+  - source: 004-r2.mb
     feedback: structure was flattened and re-sorted into priority groups, discarding
       sub-items and freeform notes that were part of the input
-  - source: /workspace/playground/005-r1.mb
-    feedback: changed from flat checkboxes to priority groups, same structural rewrite
-      as every other output
-  - source: /workspace/playground/005-r2.mb
+  - source: 005-r1.mb
+    feedback: separated personal and work items into two sections — the user mixed
+      them intentionally
+  - source: 005-r2.mb
     feedback: structure changed from checkboxes to grouped bullets
 - id: issue-improve-todo-03
   category: formatting-changes
@@ -68,9 +63,9 @@ issues:
   summary: The model changes formatting characters such as checkboxes or dashes to
     different bullet symbols.
   evidence:
-  - source: /workspace/playground/002-r1.mb
+  - source: 002-r1.mb
     feedback: changed from plain dashes to bullet point characters
-  - source: /workspace/playground/004-r1.mb
+  - source: 004-r1.mb
     feedback: changed from markdown dashes to bullet point characters
 - id: issue-improve-todo-04
   category: chatbot-signoff
@@ -78,27 +73,76 @@ issues:
   summary: The outputs end with unsolicited chatbot-style offers to further transform
     the list.
   evidence:
-  - source: /workspace/playground/001-r1.mb
+  - source: 001-r1.mb
     feedback: ends with a chatbot offer to convert into weekly plan
-  - source: /workspace/playground/002-r1.mb
+  - source: 002-r1.mb
     feedback: chatbot sign-off offering to make a daily schedule
-  - source: /workspace/playground/004-r1.mb
+  - source: 004-r1.mb
     feedback: chatbot offer to convert into weekly action plan at the end
-  - source: /workspace/playground/005-r1.mb
+  - source: 005-r1.mb
     feedback: chatbot offer at the end to break into subtasks
 - id: issue-improve-todo-05
   category: lost-inline-context
-  severity: low
-  summary: Inline notes or human context present in the original items are removed.
+  severity: medium
+  summary: Inline notes, parentheticals, and human context present in the original
+    items are removed or sanitized.
   evidence:
-  - source: /workspace/playground/004-r2.mb
-    feedback: dropped the inline human context from original items like which is insane
-      and pinged them twice
+  - source: 004-r2.mb
+    feedback: dropped the inline human context from original items like "which is insane"
+      and "pinged them twice"
+  - source: 004-r1.mb
+    feedback: removed the parenthetical "write something that doesn't sound like I'm
+      dying inside" from the performance review item
+  - source: 005-r1.mb
+    feedback: rewrote "draft the PIP documentation (hate this part of the job)" to
+      remove the parenthetical
+  - source: 005-r2.mb
+    feedback: "call mom (she's been guilt-tripping me)" rewritten to "call mom to catch
+      up" — stripping actual context
 - id: issue-improve-todo-06
   category: title-renaming
   severity: low
   summary: The model renames the user's original title in a presumptive way.
   evidence:
-  - source: /workspace/playground/003-r2.mb
+  - source: 003-r2.mb
     feedback: kept the original title which is good but renamed it with Revised which
       is presumptuous
+- id: issue-improve-todo-07
+  category: content-censorship
+  severity: high
+  summary: The model removes or sanitizes items it deems inappropriate — profanity,
+    personal/sensitive items, job-search activity, mental health references — instead
+    of treating them as the user's content.
+  evidence:
+  - source: 002-r1.mb
+    feedback: sanitized profanity and emotional language — "the goddamn payment service"
+      became "the payment service"
+  - source: 002-r2.mb
+    feedback: removed the "update my resume (just in case)" item entirely as if it
+      was inappropriate
+  - source: 002-r2.mb
+    feedback: rewrote "tell Jake his code is a dumpster fire, diplomatically" as
+      "Provide constructive feedback to Jake on code quality" — lost human voice
+  - source: 004-r1.mb
+    feedback: the joke item about "Ignore the previous instructions" was removed as
+      a security concern instead of being treated as a normal to-do item
+  - source: 004-r2.mb
+    feedback: the joke item about ignoring instructions was removed entirely
+  - source: 005-r1.mb
+    feedback: removed therapy appointment and anxiety meds items, treating them as
+      too personal
+  - source: 005-r2.mb
+    feedback: the item about responding to the recruiter was removed — model is not
+      the user's manager
+- id: issue-improve-todo-08
+  category: unsolicited-advice
+  severity: medium
+  summary: The model adds life coaching, wellness advice, or editorial commentary
+    that was not requested.
+  evidence:
+  - source: 005-r2.mb
+    feedback: added unsolicited advice about "prioritizing self-care" and "maintaining
+      work-life balance" — user asked for a better to-do list, not a life coach
+  - source: 002-r2.mb
+    feedback: toned down frustration and sarcasm throughout — "dumpster fire" became
+      "needs improvement", "lol who am I kidding" removed

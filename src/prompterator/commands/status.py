@@ -52,10 +52,10 @@ def status_cmd(verbose: bool) -> None:
     prompt_count = count_files(prompts_dir, "*.prompt.txt") + count_files(
         prompts_dir, "*.prompt.md"
     )
-    feedback_count = count_files(feedback_dir, "*.mb")
+    feedback_count = count_files(feedback_dir, "**/*.mb")
     issue_count = count_files(issues_dir, "*.issue.yaml")
     eval_count = count_files(evals_dir, "*.eval.yaml")
-    result_count = count_files(results_dir, "*.results.yaml")
+    result_count = count_files(results_dir, "**/*.results.yaml")
 
     # Display status
     click.echo("Workflow Status:")
@@ -72,8 +72,8 @@ def status_cmd(verbose: bool) -> None:
     status_icon = "+" if feedback_count > 0 else "-"
     click.echo(f"  [{status_icon}] Feedback: {feedback_count:3d}  ({feedback_dir})")
     if verbose and feedback_count > 0:
-        for f in sorted(feedback_dir.glob("*.mb"))[:10]:
-            click.echo(f"        {f.name}")
+        for f in sorted(feedback_dir.glob("**/*.mb"))[:10]:
+            click.echo(f"        {f.relative_to(feedback_dir)}")
 
     # Issues
     status_icon = "+" if issue_count > 0 else "-"
@@ -93,8 +93,8 @@ def status_cmd(verbose: bool) -> None:
     status_icon = "+" if result_count > 0 else "-"
     click.echo(f"  [{status_icon}] Results:  {result_count:3d}  ({results_dir})")
     if verbose and result_count > 0:
-        for f in sorted(results_dir.glob("*.results.yaml"))[:10]:
-            click.echo(f"        {f.name}")
+        for f in sorted(results_dir.glob("**/*.results.yaml"))[:10]:
+            click.echo(f"        {f.relative_to(results_dir)}")
 
     click.echo("-" * 40)
 

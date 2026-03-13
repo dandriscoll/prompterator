@@ -6,13 +6,14 @@ import click
 
 from prompterator.config.loader import get_config_base_dir, load_config
 from prompterator.core.eval_runner import run_all_evals, save_result_file
-from prompterator.core.eval_spec import load_eval_file
+from prompterator.core.run import create_run_dir
+from prompterator.commands.resolve import ResolveError, resolve_prompt_and_evals
 from prompterator.runners.critic_script import CriticScriptError
 from prompterator.runners.llm import LLMClient, LLMError
 
 
 @click.command("test")
-@click.argument("prompt", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("prompt", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=False)
 @click.option(
     "--evals",
     "evals_path",
@@ -25,50 +26,59 @@ from prompterator.runners.llm import LLMClient, LLMError
     help="Output path for results file (default: auto-generated)",
 )
 @click.option(
+    "--samples",
+    "-s",
+    type=int,
+    default=None,
+    help="Samples per eval (default: from config critic.samples)",
+)
+@click.option(
     "--verbose",
     "-v",
     is_flag=True,
     help="Show detailed results",
 )
 def test_cmd(
-    prompt: Path,
+    prompt: Path | None,
     evals_path: Path | None,
     output: Path | None,
+    samples: int | None,
     verbose: bool,
 ) -> None:
     """Run evaluations against a prompt and report results.
 
-    PROMPT is the path to the prompt file to test.
+    PROMPT is the path to the prompt file to test (optional — can be
+    derived from eval files).
     """
     config = load_config()
     base_dir = get_config_base_dir()
 
-    # Find eval file if not specified
-    if evals_path is None:
-        evals_dir = config.get_dir("evals", base_dir)
-        base_name = prompt.stem.split(".")[0]
-        evals_path = evals_dir / f"{base_name}.eval.yaml"
-
-        if not evals_path.exists():
-            click.echo(f"No eval file found at {evals_path}")
-            click.echo("Run 'prompterator evals' first or specify --evals path.")
-            raise SystemExit(1)
-
     try:
-        eval_file = load_eval_file(evals_path)
-    except Exception as e:
-        click.echo(f"Error loading eval file: {e}", err=True)
+        prompt, evals_path, eval_file = resolve_prompt_and_evals(
+            config, base_dir, prompt, evals_path,
+        )
+    except ResolveError as e:
+        click.echo(str(e))
         raise SystemExit(1)
 
     if not eval_file.evals:
         click.echo("No evaluations to run.")
         raise SystemExit(1)
 
+    n_samples = samples if samples is not None else config.critic.samples
+
     click.echo(f"Testing: {prompt}")
     click.echo(f"Evals: {len(eval_file.evals)} from {evals_path.name}")
+    click.echo(f"Samples: {n_samples}, confidence: {config.critic.confidence_threshold:.0%}")
     click.echo()
 
-    # Initialize critic (LLM or script mode)
+    # Initialize LLMs
+    try:
+        author_llm = LLMClient(**config.resolve_role("author"))
+    except LLMError as e:
+        click.echo(f"Author LLM error: {e}", err=True)
+        raise SystemExit(1)
+
     llm = None
     script = None
     script_timeout = config.critic.script_timeout
@@ -85,10 +95,15 @@ def test_cmd(
             raise SystemExit(1)
 
     # Run evaluations
+    from prompterator.runners.llm import debug_context
+    debug_context("test")
     click.echo("Running evaluations...")
     try:
         result_file = run_all_evals(
             eval_file, prompt, llm,
+            author_llm=author_llm,
+            samples=n_samples,
+            confidence_threshold=config.critic.confidence_threshold,
             script=script, script_timeout=script_timeout,
         )
     except LLMError as e:
@@ -128,18 +143,23 @@ def test_cmd(
         f"Passed: {result_file.summary.passed_count}/{result_file.summary.passed_count + result_file.summary.failed_count}"
     )
 
-    # Save results if output specified or to default location
-    if output is None:
-        results_dir = config.get_dir("results", base_dir)
-        base_name = prompt.stem.split(".")[0]
-        # Include variation in filename if present
-        stem_parts = prompt.stem.split(".")
-        if len(stem_parts[0]) > 3 and stem_parts[0][3:4].isalpha():
-            base_name = stem_parts[0]
-        output = results_dir / f"{base_name}.results.yaml"
+    # Save results
+    base_name = prompt.stem.split(".")[0]
+    stem_parts = prompt.stem.split(".")
+    if len(stem_parts[0]) > 3 and stem_parts[0][3:4].isalpha():
+        base_name = stem_parts[0]
 
-    save_result_file(result_file, output)
-    click.echo(f"\nResults saved to: {output}")
+    if output is not None:
+        run_dir = output if output.is_dir() else output.parent
+    else:
+        results_dir = config.get_dir("results", base_dir)
+        run_dir = create_run_dir(results_dir)
+
+    save_result_file(result_file, run_dir / f"{base_name}.results.yaml")
+    if result_file.generated_output:
+        (run_dir / f"{base_name}.output.txt").write_text(result_file.generated_output)
+
+    click.echo(f"\nResults saved to: {run_dir}")
 
     # Exit with error if failed
     if result_file.summary.verdict == "FAIL":

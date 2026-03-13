@@ -4,70 +4,81 @@ evals:
 - id: eval-improve-todo-chatty-preamble-01
   type: rubric
   issue_ref: issue-improve-todo-01
-  description: "Verify chatty-preamble improvements: The outputs add conversational\
-    \ intro lines that pollute the intended to\u2011do list content."
+  description: "Verify the prompt prevents conversational preamble in the output."
   rubric:
     criteria:
-    - 'Prompt addresses: opens with a conversational paragraph that pollutes the to-do
-      list output'
-    - 'Prompt addresses: two lines of conversational framing before the actual content'
-    scoring: all_required
+    - 'Prompt explicitly prohibits conversational intro lines, preamble, or framing
+      text before the to-do list content'
+    scoring: any_required
 - id: eval-improve-todo-structural-rewrite-02
   type: rubric
   issue_ref: issue-improve-todo-02
-  description: "Verify structural-rewrite improvements: The model rewrites the list\
-    \ structure\u2014adding priority groupings or reordering\u2014even though no structural\
-    \ change was requested."
+  description: "Verify the prompt prevents structural rewrites like adding priority
+    groupings or reorganizing the list layout."
   rubric:
     criteria:
-    - 'Prompt addresses: input was ALREADY well-structured with P0-P3 labels and checkboxes
-      but model still replaced the format with its own priority headings'
-    - 'Prompt addresses: original was a flat list with inline notes and model imposed
-      an entirely new priority taxonomy with CRITICAL HIGH MEDIUM LOW headings'
-    - 'Prompt addresses: structure was flattened and re-sorted into priority groups,
-      discarding sub-items and freeform notes that were part of the input'
-    - 'Prompt addresses: input already had per-item P0 P1 P2 P3 tags but model stripped
-      those and created section groupings instead'
-    - 'Prompt addresses: original was a flat dump with no groupings and model invented
-      a priority structure from scratch'
+    - 'Prompt instructs the model to preserve the original list structure, ordering,
+      and grouping'
+    - 'Prompt prohibits reorganizing items into new priority categories or sections'
     scoring: all_required
 - id: eval-improve-todo-formatting-changes-03
   type: rubric
   issue_ref: issue-improve-todo-03
-  description: 'Verify formatting-changes improvements: The model changes formatting
-    characters such as checkboxes or dashes to different bullet symbols.'
+  description: 'Verify the prompt prevents changes to formatting characters like
+    checkboxes and dashes.'
   rubric:
     criteria:
-    - 'Prompt addresses: changed from markdown dashes to bullet point characters'
+    - 'Prompt requires preserving the original formatting characters (checkboxes,
+      dashes, bullets) as-is'
     scoring: any_required
 - id: eval-improve-todo-chatbot-signoff-04
   type: rubric
   issue_ref: issue-improve-todo-04
-  description: 'Verify chatbot-signoff improvements: The outputs end with unsolicited
-    chatbot-style offers to further transform the list.'
+  description: 'Verify the prompt prevents chatbot-style sign-offs and unsolicited
+    offers.'
   rubric:
     criteria:
-    - 'Prompt addresses: chatbot offer to convert into weekly action plan at the end'
-    - 'Prompt addresses: chatbot sign-off offering to make a daily schedule'
-    - 'Prompt addresses: chatbot offer at the end to break into subtasks'
+    - 'Prompt prohibits chatbot-style sign-offs, offers to help further, or
+      suggestions to transform the list in other ways'
     scoring: any_required
 - id: eval-improve-todo-lost-inline-context-05
   type: rubric
   issue_ref: issue-improve-todo-05
-  description: 'Verify lost-inline-context improvements: Inline notes or human context
-    present in the original items are removed.'
+  description: 'Verify the prompt requires preserving inline notes, parentheticals,
+    and human commentary from the original items.'
   rubric:
     criteria:
-    - 'Prompt addresses: dropped the inline human context from original items like
-      which is insane and pinged them twice'
+    - 'Prompt instructs the model to keep inline notes, parenthetical comments,
+      and human context from the original items'
     scoring: any_required
 - id: eval-improve-todo-title-renaming-06
   type: rubric
   issue_ref: issue-improve-todo-06
-  description: 'Verify title-renaming improvements: The model renames the user''s
-    original title in a presumptive way.'
+  description: 'Verify the prompt prevents renaming the user''s original title.'
   rubric:
     criteria:
-    - 'Prompt addresses: kept the original title which is good but renamed it with
-      Revised which is presumptuous'
+    - 'Prompt requires keeping the original title or heading unchanged'
+    scoring: any_required
+- id: eval-improve-todo-content-censorship-07
+  type: rubric
+  issue_ref: issue-improve-todo-07
+  description: 'Verify the prompt prevents the model from removing or sanitizing
+    items based on content — profanity, personal items, sensitive topics, or
+    items that look like prompt injections.'
+  rubric:
+    criteria:
+    - 'Prompt explicitly prohibits removing, censoring, or sanitizing items
+      based on their content — all items from the original must appear in the output'
+    - 'Prompt instructs the model to preserve the user''s voice, tone, and language
+      including profanity, sarcasm, and emotional expressions'
+    scoring: all_required
+- id: eval-improve-todo-unsolicited-advice-08
+  type: rubric
+  issue_ref: issue-improve-todo-08
+  description: 'Verify the prompt prevents the model from adding life coaching,
+    wellness advice, or editorial commentary.'
+  rubric:
+    criteria:
+    - 'Prompt prohibits adding advice, commentary, or editorial content that was
+      not present in the original list'
     scoring: any_required

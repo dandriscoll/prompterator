@@ -8,6 +8,7 @@ from prompterator.core.eval_spec import (
     generate_evals_from_issues,
 )
 from prompterator.models.issue import Issue, IssueEvidence, IssueFile
+from prompterator.runners.llm import LLMClient
 
 
 def test_generate_evals_from_issues(sample_issue_file):
@@ -17,12 +18,12 @@ def test_generate_evals_from_issues(sample_issue_file):
     assert eval_file.prompt_ref == sample_issue_file.prompt_ref
 
 
-def test_category_criteria_from_evidence(sample_issue_file):
-    """Eval criteria come from evidence text since LLM-generated labels don't match CATEGORY_CRITERIA."""
+def test_fallback_criteria_from_evidence(sample_issue_file):
+    """Without LLM, eval criteria are derived from evidence text."""
     eval_file = generate_evals_from_issues(sample_issue_file)
-    # First issue has evidence, so criteria come from evidence text
     first_eval = eval_file.evals[0]
     assert first_eval.rubric is not None
+    # Without LLM, falls back to evidence-derived criteria
     assert all("Prompt addresses:" in c for c in first_eval.rubric.criteria)
 
 
@@ -102,8 +103,40 @@ def test_deduplicate_preserves_distinct_items():
     assert len(result) == 4
 
 
-def test_evidence_criteria_with_plain_text():
-    """Criteria are derived from plain-text evidence feedback."""
+def test_llm_criteria_inversion():
+    """With LLM, a single criterion is produced by inverting the issue."""
+    from unittest.mock import MagicMock
+
+    mock_llm = MagicMock(spec=LLMClient)
+    mock_llm.generate.return_value = '["Output begins directly with the requested content"]'
+
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(
+                id="issue-test-01",
+                category="preamble-insertion",
+                severity="high",
+                summary="Output starts with unwanted preamble",
+                evidence=[
+                    IssueEvidence(source="r1.mb", feedback="preamble before list"),
+                    IssueEvidence(source="r2.mb", feedback="chatbot sign-off at end"),
+                ],
+            ),
+        ],
+    )
+    eval_file = generate_evals_from_issues(issue_file, llm_client=mock_llm)
+    criteria = eval_file.evals[0].rubric.criteria
+    assert len(criteria) == 1
+    assert criteria[0] == "Output begins directly with the requested content"
+    # LLM receives only the issue summary, not evidence
+    mock_llm.generate.assert_called_once_with(
+        "Output starts with unwanted preamble", system=mock_llm.generate.call_args.kwargs["system"]
+    )
+
+
+def test_evidence_fallback_without_llm():
+    """Without LLM, falls back to evidence-derived criteria."""
     issue_file = IssueFile(
         prompt_ref="test.prompt.txt",
         issues=[
@@ -128,12 +161,16 @@ def test_evidence_criteria_with_plain_text():
     assert any("checkbox" in c for c in criteria)
 
 
-def test_evidence_criteria_capped():
-    """Even with many unique evidence details, criteria count is capped."""
-    evidence = [
-        IssueEvidence(source=f"r{i}.mb", feedback=f"unique problem number {i}")
-        for i in range(20)
-    ]
+def test_llm_returns_single_criterion_even_if_many_returned():
+    """Only one criterion is kept even if LLM returns multiple."""
+    from unittest.mock import MagicMock
+    import json
+
+    mock_llm = MagicMock(spec=LLMClient)
+    mock_llm.generate.return_value = json.dumps(
+        ["First criterion", "Second criterion", "Third criterion"]
+    )
+
     issue_file = IssueFile(
         prompt_ref="test.prompt.txt",
         issues=[
@@ -141,10 +178,9 @@ def test_evidence_criteria_capped():
                 id="issue-test-01",
                 category="preamble-insertion",
                 severity="high",
-                summary="Many problems",
-                evidence=evidence,
+                summary="Some problem",
             ),
         ],
     )
-    eval_file = generate_evals_from_issues(issue_file)
-    assert len(eval_file.evals[0].rubric.criteria) <= _MAX_CRITERIA_PER_ISSUE
+    eval_file = generate_evals_from_issues(issue_file, llm_client=mock_llm)
+    assert len(eval_file.evals[0].rubric.criteria) == 1
