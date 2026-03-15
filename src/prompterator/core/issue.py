@@ -104,12 +104,14 @@ def consolidate_feedback(
         clusters = json.loads(raw_response)
     except json.JSONDecodeError:
         # Try to find JSON array in the response
+        clusters = []
         start = raw_response.find("[")
         end = raw_response.rfind("]") + 1
         if start >= 0 and end > start:
-            clusters = json.loads(raw_response[start:end])
-        else:
-            clusters = []
+            try:
+                clusters = json.loads(raw_response[start:end])
+            except json.JSONDecodeError:
+                pass
 
     # 4. Build issues from clusters
     total_sources = len({source for source, _ in observations})
