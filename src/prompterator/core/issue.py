@@ -11,8 +11,16 @@ from prompterator.runners.llm import LLMClient
 _CLUSTER_SYSTEM = (
     "You are a feedback analyst. You receive a numbered list of free-form observations "
     "about LLM-generated outputs. Your job is to cluster the observations by the real "
-    "underlying problem they describe. Ignore positive observations (praise, approval, "
-    "things that are fine). Output ONLY a JSON array of clusters. Each cluster has:\n"
+    "underlying problem IN THE OUTPUT they describe.\n\n"
+    "IMPORTANT RULES:\n"
+    "- Only create issues about problems with the LLM-generated output itself.\n"
+    "- Ignore positive observations (praise, approval, things that are fine).\n"
+    "- NEVER create issues about the feedback or the review process (e.g. do NOT "
+    'create issues like "feedback is repetitive", "same point raised multiple times", '
+    'or "reviewers agree"). Repetition across feedback entries means the problem is '
+    "widespread — cluster those entries under the output problem they describe, "
+    "not under a meta-observation about the feedback.\n\n"
+    "Output ONLY a JSON array of clusters. Each cluster has:\n"
     '  "label": a short kebab-case tag (e.g. "chatty-preamble", "structural-rewrite"),\n'
     '  "summary": one sentence distilling the underlying problem into an actionable '
     "description. Do NOT echo the user's words — diagnose the root cause and describe "
