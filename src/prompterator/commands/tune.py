@@ -8,6 +8,7 @@ from prompterator.config.loader import get_config_base_dir, load_config
 from prompterator.commands.resolve import (
     ResolveError,
     resolve_content_with_paths,
+    resolve_counterpart,
     resolve_feedback,
     resolve_issues,
     resolve_prompt_and_evals,
@@ -83,6 +84,18 @@ from prompterator.runners.llm import LLMClient, LLMError
     is_flag=True,
     help="Run all evals for every content file (skip feedback-based filtering)",
 )
+@click.option(
+    "--counterpart",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Counterpart directions file for multi-turn dialog (overrides config)",
+)
+@click.option(
+    "--dialog-turns",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Number of author turns in multi-turn dialog",
+)
 def tune_cmd(
     prompt: Path | None,
     issues_path: Path | None,
@@ -95,6 +108,8 @@ def tune_cmd(
     content: Path | None,
     dry_run: bool,
     all_evals: bool,
+    counterpart: Path | None,
+    dialog_turns: int,
 ) -> None:
     """Run the full tuning loop: improve → test → improve iteratively.
 
@@ -173,6 +188,9 @@ def tune_cmd(
         )
         click.echo("  Use --all-evals to override and run every eval for every content file.")
 
+    # Resolve counterpart directions
+    counterpart_directions = resolve_counterpart(config, base_dir, counterpart)
+
     # LLM calls per test: outputs * (1 author + n_evals * ensemble critic)
     n_outputs = n_content * n_samples
     calls_per_test = n_outputs * (1 + n_evals * n_ensemble)
@@ -205,10 +223,14 @@ def tune_cmd(
     critic_llm = None
     critic_script = None
     critic_script_timeout = config.critic.script_timeout
+    counterpart_llm_client = None
 
     try:
         author_llm = LLMClient(**config.resolve_role("author"))
         editor_llm = LLMClient(**config.resolve_role("editor"))
+        if counterpart_directions:
+            counterpart_llm_client = LLMClient(**config.resolve_role("counterpart"))
+            click.echo(f"Counterpart: {len(counterpart_directions)} directions, {dialog_turns} turns")
         if config.critic.mode == "script":
             critic_script = config.critic.script
             click.echo(f"Critic mode: script ({critic_script})")
@@ -272,6 +294,9 @@ def tune_cmd(
             early_stop=early_stop,
             results_dir=results_dir,
             content_eval_map=content_eval_map,
+            counterpart_llm=counterpart_llm_client,
+            counterpart_directions=counterpart_directions or None,
+            dialog_turns=dialog_turns,
         )
     except LLMError as e:
         _clear_status()

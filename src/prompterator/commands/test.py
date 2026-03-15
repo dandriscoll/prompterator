@@ -10,6 +10,7 @@ from prompterator.core.run import create_run_dir
 from prompterator.commands.resolve import (
     ResolveError,
     resolve_content_with_paths,
+    resolve_counterpart,
     resolve_feedback,
     resolve_issues,
     resolve_prompt_and_evals,
@@ -62,6 +63,18 @@ from prompterator.runners.llm import LLMClient, LLMError
     is_flag=True,
     help="Run all evals for every content file (skip feedback-based filtering)",
 )
+@click.option(
+    "--counterpart",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Counterpart directions file for multi-turn dialog (overrides config)",
+)
+@click.option(
+    "--dialog-turns",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Number of author turns in multi-turn dialog",
+)
 def test_cmd(
     prompt: Path | None,
     evals_path: Path | None,
@@ -71,6 +84,8 @@ def test_cmd(
     content: Path | None,
     verbose: bool,
     all_evals: bool,
+    counterpart: Path | None,
+    dialog_turns: int,
 ) -> None:
     """Run evaluations against a prompt and report results.
 
@@ -150,6 +165,18 @@ def test_cmd(
     click.echo(f"LLM calls: {n_llm} ({n_author} author + {n_critic} critic)")
     click.echo()
 
+    # Resolve counterpart directions
+    counterpart_directions = resolve_counterpart(config, base_dir, counterpart)
+    counterpart_llm_client = None
+
+    if counterpart_directions:
+        click.echo(f"Counterpart: {len(counterpart_directions)} directions file(s), {dialog_turns} turns")
+        try:
+            counterpart_llm_client = LLMClient(**config.resolve_role("counterpart"))
+        except LLMError as e:
+            click.echo(f"Counterpart LLM error: {e}", err=True)
+            raise SystemExit(1)
+
     # Initialize LLMs
     try:
         author_llm = LLMClient(**config.resolve_role("author"))
@@ -186,6 +213,9 @@ def test_cmd(
             confidence_threshold=config.critic.confidence_threshold,
             script=script, script_timeout=script_timeout,
             content_eval_map=content_eval_map,
+            counterpart_llm=counterpart_llm_client,
+            counterpart_directions=counterpart_directions or None,
+            dialog_turns=dialog_turns,
         )
     except LLMError as e:
         click.echo(f"LLM error during evaluation: {e}", err=True)

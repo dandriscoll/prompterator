@@ -33,6 +33,9 @@ def _run_evals_on_text(
     script: str | None = None,
     script_timeout: int = 60,
     content_eval_map: dict[int, list[str]] | None = None,
+    counterpart_llm: LLMClient | None = None,
+    counterpart_directions: list[str] | None = None,
+    dialog_turns: int = 3,
 ) -> tuple[list, ResultSummary]:
     """Generate output from prompt text and evaluate it.
 
@@ -53,6 +56,9 @@ def _run_evals_on_text(
             confidence_threshold=confidence_threshold,
             script=script, script_timeout=script_timeout,
             content_eval_map=content_eval_map,
+            counterpart_llm=counterpart_llm,
+            counterpart_directions=counterpart_directions,
+            dialog_turns=dialog_turns,
         )
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -112,6 +118,9 @@ def run_tuning_loop(
     early_stop: bool = False,
     results_dir: Path | None = None,
     content_eval_map: dict[int, list[str]] | None = None,
+    counterpart_llm: LLMClient | None = None,
+    counterpart_directions: list[str] | None = None,
+    dialog_turns: int = 3,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -156,6 +165,9 @@ def run_tuning_loop(
         confidence_threshold=confidence_threshold,
         script=critic_script, script_timeout=critic_script_timeout,
         content_eval_map=content_eval_map,
+        counterpart_llm=counterpart_llm,
+        counterpart_directions=counterpart_directions,
+        dialog_turns=dialog_turns,
     )
     previous_results = baseline_results
     best_score = baseline_summary.overall_score
@@ -252,6 +264,9 @@ def run_tuning_loop(
             confidence_threshold=confidence_threshold,
             script=critic_script, script_timeout=critic_script_timeout,
             content_eval_map=content_eval_map,
+            counterpart_llm=counterpart_llm,
+            counterpart_directions=counterpart_directions,
+            dialog_turns=dialog_turns,
         )
 
         # Compute deltas

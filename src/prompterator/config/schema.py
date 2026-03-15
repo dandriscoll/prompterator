@@ -19,6 +19,10 @@ class DirectoriesConfig(BaseModel):
         default=None,
         description="Content file(s) to pair with the prompt. Can be a single path or a list.",
     )
+    counterpart: str | list[str] | None = Field(
+        default=None,
+        description="Counterpart directions file(s) for multi-turn dialog. Can be a single path or a list.",
+    )
 
 
 class StackConfig(BaseModel):
@@ -61,6 +65,17 @@ class AuthorConfig(LLMRoleConfig):
 
 class EditorConfig(LLMRoleConfig):
     """Editor LLM configuration - turns feedback into evals and makes changes to prompts."""
+
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
+
+
+class CounterpartConfig(LLMRoleConfig):
+    """Counterpart LLM configuration - participates in multi-turn dialog.
+
+    The counterpart simulates the other side of a conversation. It is given
+    directions (a script) that tell it how to conduct the dialog with the
+    author LLM. Directions are loaded from a file, just like content.
+    """
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
 
@@ -169,6 +184,7 @@ class Config(BaseModel):
         description="Named LLM connection stacks",
     )
     author: AuthorConfig = Field(default_factory=AuthorConfig)
+    counterpart: CounterpartConfig = Field(default_factory=CounterpartConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     critic: CriticConfig = Field(default_factory=CriticConfig)
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
@@ -177,7 +193,7 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def _validate_stack_references(self) -> "Config":
-        for role_name in ("author", "editor", "critic"):
+        for role_name in ("author", "counterpart", "editor", "critic"):
             role = getattr(self, role_name)
             if role.stack not in self.stacks:
                 raise ValueError(
@@ -250,6 +266,7 @@ class Config(BaseModel):
                 for name, stack in self.stacks.items()
             },
             "author": self._role_to_dict(self.author),
+            "counterpart": self._role_to_dict(self.counterpart),
             "editor": self._role_to_dict(self.editor),
             "critic": {
                 **self._role_to_dict(self.critic),

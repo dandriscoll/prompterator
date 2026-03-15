@@ -144,6 +144,47 @@ def resolve_content_with_paths(
     return results
 
 
+def resolve_counterpart(
+    config: Config,
+    base_dir: Path,
+    cli_counterpart: Path | None = None,
+) -> list[str]:
+    """Resolve counterpart directions texts from CLI flag or config.
+
+    Returns list of directions strings. Empty list means no counterpart.
+    """
+    return [text for _, text in resolve_counterpart_with_paths(config, base_dir, cli_counterpart)]
+
+
+def resolve_counterpart_with_paths(
+    config: Config,
+    base_dir: Path,
+    cli_counterpart: Path | None = None,
+) -> list[tuple[Path, str]]:
+    """Resolve counterpart directions files with their paths and texts.
+
+    Returns list of (path, text) tuples. Empty list means no counterpart.
+    """
+    if cli_counterpart is not None:
+        return [(cli_counterpart, cli_counterpart.read_text())]
+
+    raw = config.directories.counterpart
+    if raw is None:
+        return []
+
+    if isinstance(raw, str):
+        raw = [raw]
+
+    results = []
+    for entry in raw:
+        p = Path(entry)
+        if not p.is_absolute():
+            p = base_dir / p
+        if p.exists():
+            results.append((p, p.read_text()))
+    return results
+
+
 def resolve_feedback(
     config: Config,
     base_dir: Path,

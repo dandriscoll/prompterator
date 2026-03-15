@@ -222,6 +222,90 @@ def _prepare_author_input(prompt_content: str, content_text: str | None) -> tupl
     return content_text, prompt_content
 
 
+def run_multi_turn_dialog(
+    prompt_content: str,
+    author_llm: LLMClient,
+    counterpart_llm: LLMClient,
+    counterpart_directions: str,
+    *,
+    content_text: str | None = None,
+    turns: int = 3,
+) -> str:
+    """Run a multi-turn dialog between the author and counterpart LLMs.
+
+    The author generates from the prompt (with optional content).
+    The counterpart replies according to its directions.
+    They alternate for the given number of turns.
+
+    Args:
+        prompt_content: The author's system prompt.
+        author_llm: LLM client for the author role.
+        counterpart_llm: LLM client for the counterpart role.
+        counterpart_directions: System prompt/directions for the counterpart.
+        content_text: Optional initial content (first user message to author).
+        turns: Number of author turns (counterpart gets turns-1).
+
+    Returns:
+        Full conversation transcript as a single string.
+    """
+    user_msg, system_msg = _prepare_author_input(prompt_content, content_text)
+
+    # Conversation history for building context
+    transcript_lines: list[str] = []
+    # Running context strings for each participant
+    author_history: list[str] = []
+    counterpart_history: list[str] = []
+
+    for turn in range(turns):
+        # --- Author turn ---
+        if turn == 0:
+            # First turn: use prepared input
+            author_input = user_msg
+            author_system = system_msg
+        else:
+            # Subsequent turns: counterpart's last message is the user input
+            author_input = counterpart_history[-1]
+            author_system = prompt_content
+
+        author_response = author_llm.generate(
+            _build_conversation_prompt(author_input, author_history),
+            system=author_system,
+        )
+        author_history.append(author_response)
+        transcript_lines.append(f"[Author turn {turn + 1}]\n{author_response}")
+
+        # --- Counterpart turn (except after last author turn) ---
+        if turn < turns - 1:
+            counterpart_input = author_response
+            counterpart_response = counterpart_llm.generate(
+                _build_conversation_prompt(counterpart_input, counterpart_history),
+                system=counterpart_directions,
+            )
+            counterpart_history.append(counterpart_response)
+            transcript_lines.append(f"[Counterpart turn {turn + 1}]\n{counterpart_response}")
+
+    return "\n\n".join(transcript_lines)
+
+
+def _build_conversation_prompt(
+    current_message: str,
+    history: list[str],
+) -> str:
+    """Build a conversation prompt that includes prior history.
+
+    If there is no history, returns the current message as-is.
+    With history, prepends prior exchanges so the LLM has context.
+    """
+    if not history:
+        return current_message
+
+    parts = []
+    for i, msg in enumerate(history):
+        parts.append(f"[Previous response {i + 1}]\n{msg}")
+    parts.append(f"[Current message to respond to]\n{current_message}")
+    return "\n\n".join(parts)
+
+
 def map_content_to_evals(
     content_paths: list[Path],
     feedback_list: list[Feedback],
@@ -293,12 +377,19 @@ def run_all_evals(
     script: str | None = None,
     script_timeout: int = 60,
     content_eval_map: dict[int, list[str]] | None = None,
+    counterpart_llm: LLMClient | None = None,
+    counterpart_directions: list[str] | None = None,
+    dialog_turns: int = 3,
 ) -> ResultFile:
     """Generate output from a prompt and evaluate it with ensemble scoring.
 
     For each (content_file x sample), generates one author output, then
     evaluates it ``ensemble`` times per eval. The per-eval score is the
     mean pass rate across all (outputs x ensemble), normalized to 10.
+
+    When a counterpart LLM and directions are provided, the author output
+    is replaced by a multi-turn dialog transcript between author and
+    counterpart.
 
     Args:
         eval_file: EvalFile containing all eval specs.
@@ -315,6 +406,12 @@ def run_all_evals(
             When provided, only the listed evals run for each content file.
             Evals not listed for any content are still included in results
             but with no data (treated as not run).
+        counterpart_llm: LLM client for the counterpart in multi-turn dialog.
+        counterpart_directions: List of directions strings for counterpart.
+            If provided with counterpart_llm, multi-turn dialog is used
+            instead of single-shot author generation. Directions are cycled
+            if fewer than content files.
+        dialog_turns: Number of author turns in multi-turn dialog (default 3).
 
     Returns:
         ResultFile with aggregated results, summary, and last generated output.
@@ -337,6 +434,13 @@ def run_all_evals(
     last_output = None
     n_outputs = samples * len(content_texts)
 
+    # Determine if multi-turn dialog mode is active
+    use_dialog = (
+        counterpart_llm is not None
+        and counterpart_directions is not None
+        and len(counterpart_directions) > 0
+    )
+
     for content_idx, content_text in enumerate(content_texts):
         # Determine which evals to run for this content
         if content_eval_map is not None:
@@ -348,8 +452,19 @@ def run_all_evals(
         user_msg, system_msg = _prepare_author_input(prompt_content, content_text)
 
         for _ in range(samples):
-            # Generate one author output
-            if author_llm is not None:
+            # Generate one author output (or multi-turn dialog)
+            if use_dialog and author_llm is not None:
+                # Cycle through directions if fewer than content files
+                directions_idx = content_idx % len(counterpart_directions)
+                output_content = run_multi_turn_dialog(
+                    prompt_content,
+                    author_llm,
+                    counterpart_llm,
+                    counterpart_directions[directions_idx],
+                    content_text=content_text,
+                    turns=dialog_turns,
+                )
+            elif author_llm is not None:
                 output_content = author_llm.generate(user_msg, system=system_msg)
             else:
                 output_content = user_msg
