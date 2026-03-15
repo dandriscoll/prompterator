@@ -112,8 +112,20 @@ def resolve_content(
 
     Returns list of content strings. Empty list means no content files.
     """
+    return [text for _, text in resolve_content_with_paths(config, base_dir, cli_content)]
+
+
+def resolve_content_with_paths(
+    config: Config,
+    base_dir: Path,
+    cli_content: Path | None = None,
+) -> list[tuple[Path, str]]:
+    """Resolve content files with their paths and texts.
+
+    Returns list of (path, text) tuples. Empty list means no content files.
+    """
     if cli_content is not None:
-        return [cli_content.read_text()]
+        return [(cli_content, cli_content.read_text())]
 
     raw = config.directories.content
     if raw is None:
@@ -122,11 +134,45 @@ def resolve_content(
     if isinstance(raw, str):
         raw = [raw]
 
-    texts = []
+    results = []
     for entry in raw:
         p = Path(entry)
         if not p.is_absolute():
             p = base_dir / p
         if p.exists():
-            texts.append(p.read_text())
-    return texts
+            results.append((p, p.read_text()))
+    return results
+
+
+def resolve_feedback(
+    config: Config,
+    base_dir: Path,
+    prompt_ref: str,
+    feedback_dir: Path | None = None,
+) -> list:
+    """Resolve and parse feedback files for a prompt.
+
+    Returns list of Feedback objects matching the given prompt_ref.
+    """
+    from prompterator.commands.feedback import find_mb_files, parse_mb_file
+
+    if feedback_dir is None:
+        feedback_dir = config.get_dir("feedback", base_dir)
+
+    if not feedback_dir.exists():
+        return []
+
+    mb_files = find_mb_files(feedback_dir)
+    if not mb_files:
+        return []
+
+    feedback_list = []
+    for path in mb_files:
+        try:
+            fb = parse_mb_file(path)
+            if fb.prompt_ref is None or Path(fb.prompt_ref).name == Path(prompt_ref).name:
+                feedback_list.append(fb)
+        except Exception:
+            pass
+
+    return feedback_list

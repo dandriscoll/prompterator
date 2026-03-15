@@ -32,6 +32,7 @@ def _run_evals_on_text(
     confidence_threshold: float = 9.0,
     script: str | None = None,
     script_timeout: int = 60,
+    content_eval_map: dict[int, list[str]] | None = None,
 ) -> tuple[list, ResultSummary]:
     """Generate output from prompt text and evaluate it.
 
@@ -51,6 +52,7 @@ def _run_evals_on_text(
             ensemble=ensemble,
             confidence_threshold=confidence_threshold,
             script=script, script_timeout=script_timeout,
+            content_eval_map=content_eval_map,
         )
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -109,6 +111,7 @@ def run_tuning_loop(
     patience: int = 5,
     early_stop: bool = False,
     results_dir: Path | None = None,
+    content_eval_map: dict[int, list[str]] | None = None,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -152,6 +155,7 @@ def run_tuning_loop(
         samples=samples, ensemble=ensemble,
         confidence_threshold=confidence_threshold,
         script=critic_script, script_timeout=critic_script_timeout,
+        content_eval_map=content_eval_map,
     )
     previous_results = baseline_results
     best_score = baseline_summary.overall_score
@@ -247,6 +251,7 @@ def run_tuning_loop(
             samples=samples, ensemble=ensemble,
             confidence_threshold=confidence_threshold,
             script=critic_script, script_timeout=critic_script_timeout,
+            content_eval_map=content_eval_map,
         )
 
         # Compute deltas

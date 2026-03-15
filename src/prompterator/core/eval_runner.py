@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from prompterator.models.eval import Eval, EvalFile
+from prompterator.models.feedback import Feedback
+from prompterator.models.issue import IssueFile
 from prompterator.models.result import EvalResult, ResultFile, ResultSummary
 from prompterator.runners.llm import LLMClient
 
@@ -14,6 +16,7 @@ def _build_rubric_prompt(
     criteria: list[str],
     *,
     is_prompt_eval: bool = False,
+    input_content: str | None = None,
 ) -> str:
     """Build a prompt for rubric evaluation."""
     criteria_blocks = []
@@ -39,10 +42,20 @@ def _build_rubric_prompt(
         )
         label = "OUTPUT TO EVALUATE"
 
+    input_section = ""
+    if input_content and not is_prompt_eval:
+        input_section = f"""
+
+ORIGINAL INPUT (the content the LLM was given to work with):
+<<<
+{input_content}
+>>>
+"""
+
     return f"""{context}
 
 {criteria_list}
-
+{input_section}
 {label}:
 <<<
 {output_content}
@@ -98,6 +111,7 @@ def run_eval(
     llm_client: LLMClient | None = None,
     *,
     prompt_content: str | None = None,
+    input_content: str | None = None,
     script: str | None = None,
     script_timeout: int = 60,
 ) -> EvalResult:
@@ -107,6 +121,7 @@ def run_eval(
         eval_spec: The eval specification to run.
         output_content: The LLM-generated output to evaluate.
         llm_client: LLM client for running evaluations (used in llm mode).
+        input_content: The original content/input given to the author LLM.
         script: Path to critic script (used in script mode).
         script_timeout: Timeout for script execution in seconds.
 
@@ -129,6 +144,7 @@ def run_eval(
         content_to_eval = prompt_content if is_prompt_eval else output_content
         eval_prompt = _build_rubric_prompt(
             content_to_eval, criteria, is_prompt_eval=is_prompt_eval,
+            input_content=input_content,
         )
 
         system = "You are an expert evaluator. Be objective and thorough."
@@ -144,10 +160,19 @@ def run_eval(
         )
 
     elif eval_spec.type == "assertion" and eval_spec.assertion:
+        input_section = ""
+        if input_content:
+            input_section = f"""
+ORIGINAL INPUT:
+---
+{input_content}
+---
+
+"""
         assertion_prompt = f"""Check if this output satisfies the following assertion:
 
 ASSERTION: {eval_spec.assertion}
-
+{input_section}
 OUTPUT:
 ---
 {output_content}
@@ -197,6 +222,64 @@ def _prepare_author_input(prompt_content: str, content_text: str | None) -> tupl
     return content_text, prompt_content
 
 
+def map_content_to_evals(
+    content_paths: list[Path],
+    feedback_list: list[Feedback],
+    issue_file: IssueFile,
+    eval_file: EvalFile,
+) -> dict[int, list[str]] | None:
+    """Map each content file to the eval IDs that apply to it.
+
+    Traces the chain: content → feedback (via prior_ref) → issues
+    (via evidence source) → evals (via issue_ref).
+
+    Returns:
+        Dict mapping content index to list of eval IDs, or None if
+        any content file has no feedback coverage (meaning we cannot
+        safely filter and must run all evals).
+    """
+    # Step 1: Map content basename → set of .mb source basenames
+    content_to_mb: dict[str, set[str]] = {}
+    for fb in feedback_list:
+        mb_name = Path(fb.source_file).name
+        for entry in fb.entries:
+            if entry.prior_ref:
+                prior_name = Path(entry.prior_ref).name
+                content_to_mb.setdefault(prior_name, set()).add(mb_name)
+
+    # Step 2: Map .mb source basename → set of issue IDs
+    mb_to_issues: dict[str, set[str]] = {}
+    for issue in issue_file.issues:
+        for ev in issue.evidence:
+            src_name = Path(ev.source).name
+            mb_to_issues.setdefault(src_name, set()).add(issue.id)
+
+    # Step 3: Map issue ID → set of eval IDs
+    issue_to_evals: dict[str, set[str]] = {}
+    for eval_spec in eval_file.evals:
+        if eval_spec.issue_ref:
+            issue_to_evals.setdefault(eval_spec.issue_ref, set()).add(eval_spec.id)
+
+    # Step 4: For each content, trace the chain
+    result: dict[int, list[str]] = {}
+    for i, content_path in enumerate(content_paths):
+        content_name = content_path.name
+        mb_names = content_to_mb.get(content_name, set())
+
+        if not mb_names:
+            # This content has no feedback — can't optimize
+            return None
+
+        eval_ids: set[str] = set()
+        for mb_name in mb_names:
+            for issue_id in mb_to_issues.get(mb_name, set()):
+                eval_ids.update(issue_to_evals.get(issue_id, set()))
+
+        result[i] = sorted(eval_ids)
+
+    return result
+
+
 def run_all_evals(
     eval_file: EvalFile,
     prompt_path: Path,
@@ -209,6 +292,7 @@ def run_all_evals(
     confidence_threshold: float = 0.90,
     script: str | None = None,
     script_timeout: int = 60,
+    content_eval_map: dict[int, list[str]] | None = None,
 ) -> ResultFile:
     """Generate output from a prompt and evaluate it with ensemble scoring.
 
@@ -227,6 +311,10 @@ def run_all_evals(
         confidence_threshold: Score (out of 10) required for an eval to pass.
         script: Path to critic script (script mode).
         script_timeout: Timeout for script execution in seconds.
+        content_eval_map: Optional mapping of content index to eval IDs.
+            When provided, only the listed evals run for each content file.
+            Evals not listed for any content are still included in results
+            but with no data (treated as not run).
 
     Returns:
         ResultFile with aggregated results, summary, and last generated output.
@@ -249,7 +337,14 @@ def run_all_evals(
     last_output = None
     n_outputs = samples * len(content_texts)
 
-    for content_text in content_texts:
+    for content_idx, content_text in enumerate(content_texts):
+        # Determine which evals to run for this content
+        if content_eval_map is not None:
+            active_eval_ids = set(content_eval_map.get(content_idx, []))
+            active_evals = [e for e in eval_file.evals if e.id in active_eval_ids]
+        else:
+            active_evals = eval_file.evals
+
         user_msg, system_msg = _prepare_author_input(prompt_content, content_text)
 
         for _ in range(samples):
@@ -261,13 +356,14 @@ def run_all_evals(
             last_output = output_content
 
             # Ensemble evaluate this output
-            for eval_spec in eval_file.evals:
+            for eval_spec in active_evals:
                 passes = 0
                 details_for_output = []
                 for _ in range(ensemble):
                     result = run_eval(
                         eval_spec, output_content, llm_client,
                         prompt_content=prompt_content,
+                        input_content=content_text,
                         script=script, script_timeout=script_timeout,
                     )
                     if result.passed:
@@ -281,16 +377,24 @@ def run_all_evals(
 
     # Aggregate: score is mean pass rate normalized to 10
     results = []
+    skipped_evals = []
     for eval_spec in eval_file.evals:
         rates = per_eval_pass_rates[eval_spec.id]
+
+        if not rates and content_eval_map is not None:
+            # Eval was filtered out for all content — skip from results
+            skipped_evals.append(eval_spec.id)
+            continue
+
         mean_rate = sum(rates) / len(rates) if rates else 0.0
         score_10 = round(mean_rate * 10, 2)
         passed = score_10 >= confidence_threshold
 
         # Build details string
         fail_details = per_eval_fail_details[eval_spec.id]
-        if n_outputs > 1 or ensemble > 1:
-            total_votes = n_outputs * ensemble
+        n_actual_outputs = len(rates)
+        if n_actual_outputs > 1 or ensemble > 1:
+            total_votes = n_actual_outputs * ensemble
             total_passes = sum(int(r * ensemble) for r in rates)
             details = f"{score_10:.1f}/10 ({total_passes}/{total_votes} votes)"
             if fail_details:

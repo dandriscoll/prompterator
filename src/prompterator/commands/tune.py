@@ -5,7 +5,14 @@ from pathlib import Path
 import click
 
 from prompterator.config.loader import get_config_base_dir, load_config
-from prompterator.commands.resolve import ResolveError, resolve_prompt_and_evals, resolve_issues, resolve_content
+from prompterator.commands.resolve import (
+    ResolveError,
+    resolve_content_with_paths,
+    resolve_feedback,
+    resolve_issues,
+    resolve_prompt_and_evals,
+)
+from prompterator.core.eval_runner import map_content_to_evals
 from prompterator.core.tuner import run_tuning_loop
 from prompterator.runners.llm import LLMClient, LLMError
 
@@ -71,6 +78,11 @@ from prompterator.runners.llm import LLMClient, LLMError
     is_flag=True,
     help="Show what would be done without running LLM calls",
 )
+@click.option(
+    "--all-evals",
+    is_flag=True,
+    help="Run all evals for every content file (skip feedback-based filtering)",
+)
 def tune_cmd(
     prompt: Path | None,
     issues_path: Path | None,
@@ -82,6 +94,7 @@ def tune_cmd(
     patience: int,
     content: Path | None,
     dry_run: bool,
+    all_evals: bool,
 ) -> None:
     """Run the full tuning loop: improve → test → improve iteratively.
 
@@ -129,9 +142,36 @@ def tune_cmd(
     n_samples = samples if samples is not None else config.critic.samples
     n_ensemble = ensemble if ensemble is not None else config.critic.ensemble
 
-    # Resolve content files
-    content_texts = resolve_content(config, base_dir, content) or [None]
+    # Resolve content files (with paths for feedback mapping)
+    content_pairs = resolve_content_with_paths(config, base_dir, content)
+    if content_pairs:
+        content_paths = [p for p, _ in content_pairs]
+        content_texts = [t for _, t in content_pairs]
+    else:
+        content_paths = []
+        content_texts = [None]
     n_content = len(content_texts)
+
+    # --- Feedback-based eval filtering ------------------------------------
+    content_eval_map: dict[int, list[str]] | None = None
+
+    if not all_evals and content_paths:
+        feedback_list = resolve_feedback(
+            config, base_dir, eval_file.prompt_ref,
+        )
+        if feedback_list:
+            content_eval_map = map_content_to_evals(
+                content_paths, feedback_list, issue_file, eval_file,
+            )
+
+    if content_eval_map is not None:
+        total_pairs = sum(len(eids) for eids in content_eval_map.values())
+        full_pairs = n_content * n_evals
+        click.echo(
+            f"Feedback filtering: {total_pairs}/{full_pairs} content-eval pairs "
+            f"(skipping evals without feedback on each content)"
+        )
+        click.echo("  Use --all-evals to override and run every eval for every content file.")
 
     # LLM calls per test: outputs * (1 author + n_evals * ensemble critic)
     n_outputs = n_content * n_samples
@@ -231,6 +271,7 @@ def tune_cmd(
             patience=effective_patience,
             early_stop=early_stop,
             results_dir=results_dir,
+            content_eval_map=content_eval_map,
         )
     except LLMError as e:
         _clear_status()
