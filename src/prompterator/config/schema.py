@@ -193,7 +193,7 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def _validate_stack_references(self) -> "Config":
-        for role_name in ("author", "counterpart", "editor", "critic"):
+        for role_name in ("author", "editor", "critic"):
             role = getattr(self, role_name)
             if role.stack not in self.stacks:
                 raise ValueError(
@@ -260,13 +260,14 @@ class Config(BaseModel):
                 "issues": self.directories.issues,
                 "evals": self.directories.evals,
                 "results": self.directories.results,
+                **({"counterpart": self.directories.counterpart} if self.directories.counterpart else {}),
             },
             "stacks": {
                 name: self._stack_to_dict(stack)
                 for name, stack in self.stacks.items()
             },
             "author": self._role_to_dict(self.author),
-            "counterpart": self._role_to_dict(self.counterpart),
+            **({"counterpart": self._role_to_dict(self.counterpart)} if self.directories.counterpart else {}),
             "editor": self._role_to_dict(self.editor),
             "critic": {
                 **self._role_to_dict(self.critic),

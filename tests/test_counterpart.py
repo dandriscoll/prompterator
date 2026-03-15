@@ -306,14 +306,40 @@ def test_counterpart_config_resolve_role():
     assert role_dict["temperature"] == 0.7
 
 
-def test_counterpart_config_to_yaml():
-    """counterpart appears in YAML serialization."""
+def test_counterpart_config_to_yaml_when_configured():
+    """counterpart appears in YAML only when directories.counterpart is set."""
+    from prompterator.config.schema import Config
+
+    config = Config(directories={"counterpart": "scripts/user.txt"})
+    d = config.to_yaml_dict()
+    assert "counterpart" in d
+    assert d["counterpart"]["temperature"] == 0.7
+    assert d["directories"]["counterpart"] == "scripts/user.txt"
+
+
+def test_counterpart_config_to_yaml_omitted_by_default():
+    """counterpart is omitted from YAML when not configured."""
     from prompterator.config.schema import Config
 
     config = Config()
     d = config.to_yaml_dict()
-    assert "counterpart" in d
-    assert d["counterpart"]["temperature"] == 0.7
+    assert "counterpart" not in d
+    assert "counterpart" not in d["directories"]
+
+
+def test_existing_config_without_counterpart_loads():
+    """Existing config with custom stacks loads without counterpart error."""
+    from prompterator.config.schema import Config
+
+    # Simulates an existing config that only has a custom stack, no "default"
+    config = Config.model_validate({
+        "stacks": {"my-stack": {"runner": "openai"}},
+        "author": {"stack": "my-stack"},
+        "editor": {"stack": "my-stack"},
+        "critic": {"stack": "my-stack"},
+    })
+    # Should not raise — counterpart is optional and not validated
+    assert config.counterpart.stack == "default"
 
 
 def test_counterpart_directories_config():
