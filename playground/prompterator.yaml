@@ -28,9 +28,8 @@ directories:
 
 stacks:
   default:
-    runner: "azure-openai"
-    model: "gpt-5.1-chat"
-    api_version: "2024-02-01"
+    runner: "anthropic"
+    model: "claude-sonnet-4-20250514"
 
 author:
   stack: "default"
@@ -48,7 +47,8 @@ critic:
   max_tokens: 4096
   mode: "llm"
   samples: 3
-  confidence_threshold: 0.90
+  ensemble: 5
+  confidence_threshold: 9.0
 
 feedback:
   min_occurrences: 1

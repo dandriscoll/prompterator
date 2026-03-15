@@ -101,3 +101,32 @@ def resolve_issues(
 
     issue_file = load_issue_file(issues_path)
     return issues_path, issue_file
+
+
+def resolve_content(
+    config: Config,
+    base_dir: Path,
+    cli_content: Path | None = None,
+) -> list[str]:
+    """Resolve content texts from CLI flag or config.
+
+    Returns list of content strings. Empty list means no content files.
+    """
+    if cli_content is not None:
+        return [cli_content.read_text()]
+
+    raw = config.directories.content
+    if raw is None:
+        return []
+
+    if isinstance(raw, str):
+        raw = [raw]
+
+    texts = []
+    for entry in raw:
+        p = Path(entry)
+        if not p.is_absolute():
+            p = base_dir / p
+        if p.exists():
+            texts.append(p.read_text())
+    return texts

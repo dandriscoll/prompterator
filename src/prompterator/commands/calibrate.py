@@ -97,9 +97,14 @@ def calibrate_cmd(
         raise SystemExit(1)
 
     # --- Print header -----------------------------------------------------
+    n_evals = len(eval_file.evals)
+    n_feedback = len(feedback_list)
+    n_llm = n_evals * n_feedback
+
     click.echo(f"Calibrating: {prompt_ref}")
-    click.echo(f"Evals: {len(eval_file.evals)} from {evals_path.name}")
-    click.echo(f"Feedback files: {len(feedback_list)}")
+    click.echo(f"Evals: {n_evals} from {evals_path.name}")
+    click.echo(f"Feedback files: {n_feedback}")
+    click.echo(f"LLM calls: {n_llm} ({n_evals} evals x {n_feedback} feedback files)")
     click.echo()
 
     # --- Initialize LLM ---------------------------------------------------

@@ -37,8 +37,8 @@ def test_build_mb_block_multiple_priors():
 
 def test_build_mb_block_image_source():
     """Image files work the same as text files."""
-    result = build_mb_block("outputs/070.sdxl.jpg", ["director.prompt.md"], "pose wrong")
-    assert result.startswith("@source outputs/070.sdxl.jpg\n")
+    result = build_mb_block("outputs/001-r1.out.md", ["improve-todo.prompt.md"], "adds preamble")
+    assert result.startswith("@source outputs/001-r1.out.md\n")
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def test_derive_mb_path_strips_directory_and_extensions():
 
 
 def test_derive_mb_path_simple_extension():
-    assert derive_mb_path("070.sdxl.jpg") == Path("070.mb")
+    assert derive_mb_path("001-r1.out.md") == Path("001-r1.mb")
 
 
 def test_derive_mb_path_with_output_dir():

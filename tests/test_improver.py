@@ -32,15 +32,15 @@ def test_apply_edit_replace():
     """REPLACE action finds and replaces text."""
     original = "You are a helpful assistant.\n\nBe concise."
     response = (
-        "RATIONALE: Add greeting prohibition\n"
+        "RATIONALE: Add preamble prohibition\n"
         "ACTION: REPLACE\n"
         "FIND: Be concise.\n"
-        "REPLACE_WITH: Be concise. Do not begin with a greeting."
+        "REPLACE_WITH: Be concise. Do not add conversational preamble."
     )
     edited, rationale = _apply_edit(original, response)
-    assert "Do not begin with a greeting" in edited
+    assert "Do not add conversational preamble" in edited
     assert "Be concise" in edited
-    assert "Add greeting prohibition" in rationale
+    assert "Add preamble prohibition" in rationale
 
 
 def test_apply_edit_append():
@@ -86,15 +86,15 @@ def test_apply_edit_find_not_matched():
 def test_generate_structured_edit(sample_issue_file):
     """Full generation with structured edit."""
     llm_response = (
-        "RATIONALE: Prohibit greetings to pass eval\n"
+        "RATIONALE: Prohibit preamble to pass eval\n"
         "ACTION: APPEND\n"
-        "APPEND_TEXT: Do not begin your response with a greeting."
+        "APPEND_TEXT: Do not add conversational preamble before the list."
     )
     llm = MockLLMClient(responses=[llm_response])
 
     improved, rationale, raw = generate_improved_prompt_with_rationale(
         "You are a helpful assistant.", sample_issue_file, llm, iteration=1
     )
-    assert "Do not begin your response with a greeting." in improved
+    assert "Do not add conversational preamble before the list." in improved
     assert "You are a helpful assistant." in improved
-    assert "Prohibit greetings" in rationale
+    assert "Prohibit preamble" in rationale

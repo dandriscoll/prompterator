@@ -15,6 +15,10 @@ class DirectoriesConfig(BaseModel):
     evals: str = Field(default=".", description="Directory for eval files")
     results: str = Field(default=".", description="Directory for result files")
     prompt: str | None = Field(default=None, description="Path to the primary prompt file")
+    content: str | list[str] | None = Field(
+        default=None,
+        description="Content file(s) to pair with the prompt. Can be a single path or a list.",
+    )
 
 
 class StackConfig(BaseModel):
@@ -107,11 +111,16 @@ class CriticConfig(LLMRoleConfig):
         ge=1,
         description="Number of eval samples per test run",
     )
+    ensemble: int = Field(
+        default=5,
+        ge=1,
+        description="Number of ensemble critic evaluations per output per eval",
+    )
     confidence_threshold: float = Field(
-        default=0.90,
+        default=9.0,
         ge=0.0,
-        le=1.0,
-        description="Fraction of samples that must pass for an eval to be considered passing",
+        le=10.0,
+        description="Score out of 10 required for an eval to be considered passing",
     )
 
     @model_validator(mode="after")

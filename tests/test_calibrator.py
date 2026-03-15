@@ -75,17 +75,17 @@ def _make_eval(eval_id: str = "eval-test-01", issue_ref: str = "issue-test-01") 
 def test_classify_labels_from_issue_evidence():
     """Files in issue evidence are FAIL; others are PASS."""
     feedback_list = [
-        _make_feedback("070.sdxl.jpg.mb", "did not follow pose"),
-        _make_feedback("070a.sdxl.jpg.mb", "did not follow pose"),
-        _make_feedback("070g.sdxl.jpg.mb", "correct pose"),
+        _make_feedback("001-r1.mb", "adds conversational preamble"),
+        _make_feedback("001-r2.mb", "replaced checkboxes with sections"),
+        _make_feedback("002-r1.mb", "output looks good"),
     ]
-    issue_file = _make_issue_file(["070.sdxl.jpg.mb", "070a.sdxl.jpg.mb"])
+    issue_file = _make_issue_file(["001-r1.mb", "001-r2.mb"])
     eval_spec = _make_eval()
 
     labels = classify_labels(feedback_list, issue_file, eval_spec)
-    assert labels["070.sdxl.jpg.mb"] == "FAIL"
-    assert labels["070a.sdxl.jpg.mb"] == "FAIL"
-    assert labels["070g.sdxl.jpg.mb"] == "PASS"
+    assert labels["001-r1.mb"] == "FAIL"
+    assert labels["001-r2.mb"] == "FAIL"
+    assert labels["002-r1.mb"] == "PASS"
 
 
 def test_classify_labels_no_issue_ref():
@@ -110,13 +110,13 @@ def test_classify_labels_no_issue_ref():
 def test_classify_labels_full_path_normalisation():
     """Source files with full paths still match basename in evidence."""
     feedback_list = [
-        _make_feedback("/data/feedback/070.sdxl.jpg.mb", "bad pose"),
+        _make_feedback("/data/feedback/001-r1.mb", "adds preamble"),
     ]
-    issue_file = _make_issue_file(["070.sdxl.jpg.mb"])
+    issue_file = _make_issue_file(["001-r1.mb"])
     eval_spec = _make_eval()
 
     labels = classify_labels(feedback_list, issue_file, eval_spec)
-    assert labels["070.sdxl.jpg.mb"] == "FAIL"
+    assert labels["001-r1.mb"] == "FAIL"
 
 
 # ---------------------------------------------------------------------------

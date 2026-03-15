@@ -40,6 +40,10 @@ class TuneReport(BaseModel):
         default_factory=list,
         description="Per-eval metric history [{eval_id, before, after, delta}]",
     )
+    help_request: str | None = Field(
+        default=None,
+        description="Help request generated when tuning plateaus",
+    )
 
     def to_yaml_dict(self) -> dict:
         """Convert to dictionary suitable for YAML serialization."""
@@ -70,4 +74,5 @@ class TuneReport(BaseModel):
                 "failed_count": self.final_summary.failed_count,
             },
             "metric_table": self.metric_table,
+            **({"help_request": self.help_request} if self.help_request else {}),
         }

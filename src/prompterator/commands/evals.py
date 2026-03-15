@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 
 from prompterator.config.loader import get_config_base_dir, load_config
-from prompterator.core.eval_spec import generate_evals_from_issues, save_eval_file
+from prompterator.core.eval_spec import generate_evals_from_issues, load_eval_file, save_eval_file
 from prompterator.core.issue import load_issue_file
 from prompterator.runners.llm import LLMClient
 
@@ -63,11 +63,22 @@ def evals_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> Non
             click.echo(f"  {issue_path.name}: no issues to convert")
             continue
 
-        eval_file = generate_evals_from_issues(issue_file, llm_client)
-
-        # Generate output filename
+        # Load existing evals if present
         base_name = issue_path.stem.replace(".issue", "")
         eval_path = output / f"{base_name}.eval.yaml"
+
+        existing_evals = None
+        if eval_path.exists():
+            try:
+                existing = load_eval_file(eval_path)
+                existing_evals = existing.evals
+                click.echo(f"  {issue_path.name}: merging with {len(existing_evals)} existing evals")
+            except Exception as e:
+                click.echo(f"  Warning: could not load {eval_path}: {e}", err=True)
+
+        eval_file = generate_evals_from_issues(
+            issue_file, llm_client, existing_evals=existing_evals,
+        )
 
         if dry_run:
             click.echo(f"  Would create: {eval_path}")

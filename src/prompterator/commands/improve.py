@@ -56,7 +56,7 @@ from prompterator.runners.llm import LLMClient, LLMError
     "-d",
     type=str,
     default=None,
-    help='Specific change to make, e.g. "explicitly prohibit greetings"',
+    help='Specific change to make, e.g. "explicitly prohibit conversational preamble"',
 )
 @click.option(
     "--dry-run",

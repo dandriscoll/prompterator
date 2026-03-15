@@ -7,7 +7,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from prompterator.core.eval_runner import run_all_evals, save_result_file
-from prompterator.core.improver import generate_improved_prompt_with_rationale
+from prompterator.core.improver import (
+    generate_improved_prompt_with_rationale,
+    generate_help_request,
+    consolidate_redundant_lines,
+)
 from prompterator.runners.llm import debug_context
 from prompterator.models.eval import EvalFile
 from prompterator.models.issue import IssueFile
@@ -22,8 +26,10 @@ def _run_evals_on_text(
     critic_llm: LLMClient | None,
     *,
     author_llm: LLMClient | None = None,
+    content_texts: list[str | None] | None = None,
     samples: int = 1,
-    confidence_threshold: float = 0.90,
+    ensemble: int = 5,
+    confidence_threshold: float = 9.0,
     script: str | None = None,
     script_timeout: int = 60,
 ) -> tuple[list, ResultSummary]:
@@ -40,7 +46,9 @@ def _run_evals_on_text(
         result_file = run_all_evals(
             eval_file, tmp_path, critic_llm,
             author_llm=author_llm,
+            content_texts=content_texts,
             samples=samples,
+            ensemble=ensemble,
             confidence_threshold=confidence_threshold,
             script=script, script_timeout=script_timeout,
         )
@@ -89,10 +97,13 @@ def run_tuning_loop(
     critic_llm: LLMClient | None = None,
     max_iterations: int = 20,
     on_iteration: Callable | None = None,
+    on_status: Callable[[str], None] | None = None,
     *,
     author_llm: LLMClient | None = None,
+    content_texts: list[str | None] | None = None,
     samples: int = 1,
-    confidence_threshold: float = 0.90,
+    ensemble: int = 5,
+    confidence_threshold: float = 9.0,
     critic_script: str | None = None,
     critic_script_timeout: int = 60,
     patience: int = 5,
@@ -137,7 +148,9 @@ def run_tuning_loop(
     baseline_results, baseline_summary = _run_evals_on_text(
         current_text, eval_file, critic_llm,
         author_llm=author_llm,
-        samples=samples, confidence_threshold=confidence_threshold,
+        content_texts=content_texts,
+        samples=samples, ensemble=ensemble,
+        confidence_threshold=confidence_threshold,
         script=critic_script, script_timeout=critic_script_timeout,
     )
     previous_results = baseline_results
@@ -145,47 +158,82 @@ def run_tuning_loop(
     best_results = baseline_results
     stall_count = 0
 
-    for i in range(1, max_iterations + 1):
-        # Generate improvement
-        debug_context(f"tune.{i}.improve")
-        improved_text, rationale, raw_output, edit_action = generate_improved_prompt_with_rationale(
-            current_text, issue_file, editor_llm,
-            eval_results=previous_results, iteration=i,
-            edit_history=edit_history,
-            stall_count=stall_count,
-        )
+    def _status(msg: str) -> None:
+        if on_status:
+            on_status(msg)
 
-        # If the edit didn't change the prompt, record and skip eval
-        if improved_text == current_text:
+    for i in range(1, max_iterations + 1):
+        _status(f"Iteration {i}/{max_iterations}: consolidating...")
+        # Consolidate redundant lines before generating a new edit
+        consolidated, con_rationale, _con_raw = consolidate_redundant_lines(
+            current_text, editor_llm,
+        )
+        if consolidated != current_text:
+            _status(f"Iteration {i}/{max_iterations}: consolidated — {con_rationale}")
+            current_text = consolidated
+            best_text = consolidated
+            with open(prompt_path, "w") as f:
+                f.write(consolidated)
+
+        # Generate improvement — retry up to 3 times if the edit doesn't produce a change
+        max_retries = 3
+        improved_text = current_text
+        rationale = ""
+        raw_output = ""
+        edit_action = "UNKNOWN"
+
+        for attempt in range(max_retries):
+            _status(f"Iteration {i}/{max_iterations}: generating idea" + (f" (retry {attempt + 1})" if attempt else "") + "...")
+            debug_context(f"tune.{i}.improve" + (f".retry{attempt}" if attempt else ""))
+            improved_text, rationale, raw_output, edit_action = generate_improved_prompt_with_rationale(
+                current_text, issue_file, editor_llm,
+                eval_results=previous_results, iteration=i,
+                edit_history=edit_history,
+                stall_count=stall_count,
+            )
+            if improved_text != current_text:
+                break
+            _status(f"Iteration {i}/{max_iterations}: edit rejected — {rationale[:60]}")
+            # Record the failed attempt in history so next retry knows
             edit_history.append({
                 "rationale": rationale,
                 "action": edit_action,
                 "accepted": False,
             })
-            # Build a minimal record for the iteration
-            diff = PromptDiff(before=current_text, after=current_text)
-            record = IterationRecord(
-                iteration=i,
-                prompt_text=current_text,
-                rationale=rationale + " (no change)",
-                diff=diff,
-                eval_results=previous_results,
-                summary=ResultSummary(
-                    verdict="FAIL",
-                    overall_score=best_score,
-                    passed=sum(1 for r in previous_results if r.passed),
-                    total=len(previous_results),
-                ),
-                metric_deltas={},
-                l2_output=raw_output,
-            )
-            iterations.append(record)
-            if on_iteration:
-                on_iteration(record)
+
+        # If all retries failed to produce a change, count as stall
+        if improved_text == current_text:
             stall_count += 1
-            if stall_count >= patience and i > 1:
+            if on_iteration:
+                n_passed = sum(1 for r in previous_results if r.passed)
+                n_total = len(previous_results)
+                if n_passed == n_total:
+                    v = "PASS"
+                elif n_passed == 0 and best_score <= 2.5:
+                    v = "FAIL"
+                else:
+                    v = "PARTIAL"
+                record = IterationRecord(
+                    iteration=i,
+                    prompt_text=current_text,
+                    rationale=rationale + " (no valid edit)",
+                    diff=PromptDiff(before=current_text, after=current_text),
+                    eval_results=previous_results,
+                    summary=ResultSummary(
+                        verdict=v, overall_score=best_score,
+                        passed=n_passed, total=n_total,
+                    ),
+                    metric_deltas={},
+                    l2_output=raw_output,
+                )
+                on_iteration(record)
+            # Bail out if stuck for too long — no valid edits possible
+            if stall_count >= max(patience, 3):
+                _status(f"Bailing out — stuck for {stall_count} iterations")
                 break
             continue
+
+        _status(f"Iteration {i}/{max_iterations}: evaluating...")
 
         # Build diff
         diff = PromptDiff(before=current_text, after=improved_text)
@@ -195,7 +243,9 @@ def run_tuning_loop(
         new_results, new_summary = _run_evals_on_text(
             improved_text, eval_file, critic_llm,
             author_llm=author_llm,
-            samples=samples, confidence_threshold=confidence_threshold,
+            content_texts=content_texts,
+            samples=samples, ensemble=ensemble,
+            confidence_threshold=confidence_threshold,
             script=critic_script, script_timeout=critic_script_timeout,
         )
 
@@ -218,7 +268,7 @@ def run_tuning_loop(
         if on_iteration:
             on_iteration(record)
 
-        # Save per-iteration results
+        # Save per-iteration results and prompt snapshot
         if run_dir is not None:
             result_file = ResultFile(
                 prompt_tested=str(prompt_path),
@@ -226,6 +276,8 @@ def run_tuning_loop(
                 summary=new_summary,
             )
             save_result_file(result_file, run_dir / f"{base_name}.{i:03d}.results.yaml")
+            snapshot_path = run_dir / f"{base_name}.{i:03d}.prompt{prompt_path.suffix}"
+            snapshot_path.write_text(improved_text)
 
         # Accept or reject: only move forward if score improved
         accepted = new_summary.overall_score >= best_score
@@ -237,7 +289,7 @@ def run_tuning_loop(
 
         # Use a noise margin so small score fluctuations from low sample
         # counts don't cause false stalls or false improvements.
-        noise_margin = 0.5 / max(len(new_results), 1)
+        noise_margin = 5.0 / max(len(new_results), 1)
 
         if new_summary.overall_score > best_score + noise_margin:
             # Clear improvement beyond noise
@@ -268,14 +320,14 @@ def run_tuning_loop(
             previous_results = best_results
             stall_count += 1
 
-        # Check termination: all pass
-        if new_summary.verdict == "PASS":
+        # Check termination: all pass (only in early_stop mode)
+        if early_stop and new_summary.verdict == "PASS":
             best_text = improved_text
             best_results = new_results
             break
 
-        # Check termination: patience exhausted
-        if stall_count >= patience and i > 1:
+        # Check termination: patience exhausted (only in early_stop mode)
+        if early_stop and stall_count >= patience and i > 1:
             break
 
     # Use the best prompt tracked during the loop
@@ -290,6 +342,16 @@ def run_tuning_loop(
 
     metric_table = _build_metric_table(baseline_results, final_results)
 
+    # Generate help request if we plateaued or got stuck without passing
+    help_request = None
+    if final_summary.verdict != "PASS" and stall_count >= min(patience, 3):
+        debug_context("tune.help-request")
+        help_request = generate_help_request(
+            best_text, issue_file, editor_llm,
+            eval_results=best_results,
+            edit_history=edit_history,
+        )
+
     report = TuneReport(
         prompt_ref=str(prompt_path),
         max_iterations=max_iterations,
@@ -297,6 +359,7 @@ def run_tuning_loop(
         final_prompt=final_text,
         final_summary=final_summary,
         metric_table=metric_table,
+        help_request=help_request,
     )
 
     # Save outputs

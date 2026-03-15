@@ -178,30 +178,53 @@ REASON: [brief explanation]"""
         )
 
 
+def _prepare_author_input(prompt_content: str, content_text: str | None) -> tuple[str, str | None]:
+    """Prepare the author LLM input from prompt and content.
+
+    Returns:
+        Tuple of (user_message, system_message).
+        If content has {{INPUT}}, substitution is done and system is None.
+        If content is provided without {{INPUT}}, prompt becomes system.
+        If no content, prompt is the user message with no system.
+    """
+    if content_text is None:
+        return prompt_content, None
+
+    if "{{INPUT}}" in prompt_content:
+        return prompt_content.replace("{{INPUT}}", content_text), None
+
+    # Prompt becomes system, content becomes user
+    return content_text, prompt_content
+
+
 def run_all_evals(
     eval_file: EvalFile,
     prompt_path: Path,
     llm_client: LLMClient | None = None,
     *,
     author_llm: LLMClient | None = None,
+    content_texts: list[str | None] | None = None,
     samples: int = 1,
+    ensemble: int = 5,
     confidence_threshold: float = 0.90,
     script: str | None = None,
     script_timeout: int = 60,
 ) -> ResultFile:
-    """Generate output from a prompt and evaluate it.
+    """Generate output from a prompt and evaluate it with ensemble scoring.
 
-    When samples > 1, generates and evaluates multiple outputs. Each eval
-    passes only if the fraction of passing samples meets the confidence
-    threshold.
+    For each (content_file x sample), generates one author output, then
+    evaluates it ``ensemble`` times per eval. The per-eval score is the
+    mean pass rate across all (outputs x ensemble), normalized to 10.
 
     Args:
         eval_file: EvalFile containing all eval specs.
         prompt_path: Path to the prompt file.
         llm_client: LLM client for running evaluations (critic).
         author_llm: LLM client for generating output from the prompt.
-        samples: Number of generate→eval samples to run.
-        confidence_threshold: Fraction of samples that must pass per eval.
+        content_texts: List of content strings to pair with the prompt.
+        samples: Number of author outputs per content file.
+        ensemble: Number of critic evaluations per output per eval.
+        confidence_threshold: Score (out of 10) required for an eval to pass.
         script: Path to critic script (script mode).
         script_timeout: Timeout for script execution in seconds.
 
@@ -211,66 +234,89 @@ def run_all_evals(
     with open(prompt_path) as f:
         prompt_content = f.read()
 
-    # Collect per-eval results across samples
-    # eval_id -> list of EvalResult
-    per_eval: dict[str, list[EvalResult]] = {
+    if content_texts is None:
+        content_texts = [None]
+
+    # Collect per-eval ensemble results across all outputs
+    # eval_id -> list of pass rates (one per output, each from ensemble votes)
+    per_eval_pass_rates: dict[str, list[float]] = {
+        spec.id: [] for spec in eval_file.evals
+    }
+    # Also collect details from failing evaluations
+    per_eval_fail_details: dict[str, list[str]] = {
         spec.id: [] for spec in eval_file.evals
     }
     last_output = None
+    n_outputs = samples * len(content_texts)
 
-    for _ in range(samples):
-        # Generate output from the prompt
-        if author_llm is not None:
-            output_content = author_llm.generate(prompt_content)
-        else:
-            output_content = prompt_content
-        last_output = output_content
+    for content_text in content_texts:
+        user_msg, system_msg = _prepare_author_input(prompt_content, content_text)
 
-        for eval_spec in eval_file.evals:
-            result = run_eval(
-                eval_spec, output_content, llm_client,
-                prompt_content=prompt_content,
-                script=script, script_timeout=script_timeout,
-            )
-            per_eval[eval_spec.id].append(result)
+        for _ in range(samples):
+            # Generate one author output
+            if author_llm is not None:
+                output_content = author_llm.generate(user_msg, system=system_msg)
+            else:
+                output_content = user_msg
+            last_output = output_content
 
-    # Aggregate: each eval passes if pass_rate >= confidence_threshold
+            # Ensemble evaluate this output
+            for eval_spec in eval_file.evals:
+                passes = 0
+                details_for_output = []
+                for _ in range(ensemble):
+                    result = run_eval(
+                        eval_spec, output_content, llm_client,
+                        prompt_content=prompt_content,
+                        script=script, script_timeout=script_timeout,
+                    )
+                    if result.passed:
+                        passes += 1
+                    elif result.details:
+                        details_for_output.append(result.details)
+                output_pass_rate = passes / ensemble
+                per_eval_pass_rates[eval_spec.id].append(output_pass_rate)
+                if details_for_output:
+                    per_eval_fail_details[eval_spec.id].append(details_for_output[0])
+
+    # Aggregate: score is mean pass rate normalized to 10
     results = []
     for eval_spec in eval_file.evals:
-        sample_results = per_eval[eval_spec.id]
-        pass_rate = sum(1 for r in sample_results if r.passed) / len(sample_results)
-        passed = pass_rate >= confidence_threshold
-        # Score reflects the pass rate so it's consistent with the verdict
-        avg_score = pass_rate
+        rates = per_eval_pass_rates[eval_spec.id]
+        mean_rate = sum(rates) / len(rates) if rates else 0.0
+        score_10 = round(mean_rate * 10, 2)
+        passed = score_10 >= confidence_threshold
 
-        # Collect details from failing samples
-        fail_details = [r.details for r in sample_results if not r.passed and r.details]
-        if samples > 1:
-            details = f"pass_rate={pass_rate:.0%} ({sum(1 for r in sample_results if r.passed)}/{len(sample_results)})"
+        # Build details string
+        fail_details = per_eval_fail_details[eval_spec.id]
+        if n_outputs > 1 or ensemble > 1:
+            total_votes = n_outputs * ensemble
+            total_passes = sum(int(r * ensemble) for r in rates)
+            details = f"{score_10:.1f}/10 ({total_passes}/{total_votes} votes)"
             if fail_details:
                 details += f"; {fail_details[0]}"
         else:
-            details = sample_results[0].details
+            details = fail_details[0] if fail_details else ""
 
         results.append(EvalResult(
             eval_id=eval_spec.id,
             passed=passed,
-            score=avg_score,
+            score=score_10,
             details=details,
         ))
 
-    # Calculate summary
+    # Calculate summary — overall score is mean of per-eval scores (already /10)
     passed_count = sum(1 for r in results if r.passed)
     failed_count = len(results) - passed_count
 
     if results:
         overall_score = sum(r.score for r in results) / len(results)
     else:
-        overall_score = 1.0
+        overall_score = 10.0
 
     if passed_count == len(results):
         verdict = "PASS"
-    elif passed_count == 0:
+    elif passed_count == 0 and overall_score <= 2.5:
         verdict = "FAIL"
     else:
         verdict = "PARTIAL"

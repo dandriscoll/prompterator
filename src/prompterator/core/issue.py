@@ -13,7 +13,7 @@ _CLUSTER_SYSTEM = (
     "about LLM-generated outputs. Your job is to cluster the observations by the real "
     "underlying problem they describe. Ignore positive observations (praise, approval, "
     "things that are fine). Output ONLY a JSON array of clusters. Each cluster has:\n"
-    '  "label": a short kebab-case tag (e.g. "preamble-insertion", "structural-rewrite"),\n'
+    '  "label": a short kebab-case tag (e.g. "chatty-preamble", "structural-rewrite"),\n'
     '  "summary": one sentence distilling the underlying problem into an actionable '
     "description. Do NOT echo the user's words — diagnose the root cause and describe "
     "what specifically needs to change (e.g. instead of 'The text is too chatty' write "

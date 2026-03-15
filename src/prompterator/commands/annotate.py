@@ -113,12 +113,12 @@ def annotate_cmd(
         -m "opens with conversational preamble" \\
         -m "replaced checkboxes with priority sections"
 
-      prompterator annotate outputs/070.sdxl.jpg \\
-        --prior director.prompt.md --prior blend.md \\
+      prompterator annotate outputs/002-r1.out.md \\
+        --prior improve-todo.prompt.md --prior 002.todoosy.md \\
         -e
 
-      echo "pose not followed" | prompterator annotate outputs/070.sdxl.jpg \\
-        --prior director.prompt.md
+      echo "chatbot sign-off at the end" | prompterator annotate outputs/003-r1.out.md \\
+        --prior improve-todo.prompt.md
     """
     config = load_config()
     base_dir = get_config_base_dir()

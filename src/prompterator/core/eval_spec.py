@@ -16,12 +16,12 @@ _CRITERIA_SYSTEM = (
     "Do not frame it as what the output SHOULD contain — that overspecifies "
     "and tests for things beyond the original issue.\n\n"
     "Examples:\n"
-    '  Issue: "Output includes conversational filler phrases"\n'
-    '  Criterion: "Output contains no conversational filler phrases"\n\n'
-    '  Issue: "Output adds an unwanted preamble before the list"\n'
+    '  Issue: "Output adds conversational preamble before the list"\n'
     '  Criterion: "Output does not begin with a preamble or introduction"\n\n'
-    '  Issue: "Output contains incorrect arithmetic"\n'
-    '  Criterion: "Output does not contain incorrect arithmetic"\n\n'
+    '  Issue: "Output replaces checkboxes with priority-grouped sections"\n'
+    '  Criterion: "Output does not reorganize items into new categories or sections"\n\n'
+    '  Issue: "Output removes profanity and emotional language"\n'
+    '  Criterion: "Output does not sanitize or censor the user\'s original language"\n\n'
     "Stay focused on the specific issue. Do not add criteria for problems "
     "that were not raised.\n\n"
     "Output ONLY a JSON array containing exactly one string. "
@@ -170,20 +170,38 @@ def _deduplicate_details(details: list[str]) -> list[str]:
 def generate_evals_from_issues(
     issue_file: IssueFile,
     llm_client: LLMClient | None = None,
+    existing_evals: list[Eval] | None = None,
 ) -> EvalFile:
     """Generate evaluation specifications from issues.
+
+    When existing_evals is provided, evals whose issue_ref matches an
+    existing eval are kept as-is (preserving hand-tuned criteria). New
+    evals are generated only for issues not already covered.
 
     Args:
         issue_file: IssueFile containing issues to address.
         llm_client: Optional LLM client for generating inverted pass-criteria.
+        existing_evals: Previously generated evals to merge with.
 
     Returns:
-        EvalFile with generated evaluations.
+        EvalFile with merged evaluations.
     """
+    # Index existing evals by issue_ref
+    existing_by_issue: dict[str, Eval] = {}
+    if existing_evals:
+        for ev in existing_evals:
+            if ev.issue_ref:
+                existing_by_issue[ev.issue_ref] = ev
+
     evals = []
     eval_index = 1
 
     for issue in issue_file.issues:
+        # Keep existing eval if it covers this issue
+        if issue.id in existing_by_issue:
+            evals.append(existing_by_issue[issue.id])
+            eval_index += 1
+            continue
         category = issue.category.lower()
 
         # Use LLM to invert issue descriptions into pass-criteria.

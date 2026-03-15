@@ -17,24 +17,42 @@ from prompterator.runners.llm import LLMClient
 # System prompt
 # ---------------------------------------------------------------------------
 
-_EDIT_SYSTEM = """\
-You are a prompt editor. You edit PROMPT TEMPLATES — text that will be sent \
-to an LLM to control its behavior. You are NOT the LLM that will follow the \
-prompt. You are editing the prompt text to make it better.
+_IDEATION_SYSTEM = """\
+You are a prompt strategist. You analyze PROMPT TEMPLATES — text sent to an \
+LLM to control its behavior — and propose improvements.
 
-ISSUES describe problems with the LLM's output when it follows the prompt. \
-EVALS check whether the prompt contains the right instructions to prevent \
-those problems. To fix a failing eval, ADD or MODIFY instructions in the \
-prompt that tell the LLM what to do or not do.
+ISSUES describe problems with the LLM's output. EVALS check whether the \
+prompt addresses each issue. Your job is to propose ONE specific change \
+that will fix a failing eval without regressing passing ones.
 
-IMPORTANT: Do NOT delete or shorten the existing prompt. Instead, ADD new \
-rules and constraints. For example, if the LLM's output has unwanted \
-preamble, do NOT remove text from the prompt — instead ADD an instruction \
-like "Output only the improved list with no introduction or commentary."
+Think creatively about what instruction would fix the issue. Consider:
+- What specific LLM behavior is wrong?
+- What concrete rule would prevent it?
+- Is there an existing instruction to strengthen, or do we need a new one?
 
-Respond in EXACTLY this format — no other text:
+Respond in EXACTLY this format:
 
-RATIONALE: one sentence saying what instruction you are adding and why
+IDEA: 2-3 sentences describing what to change and why. Be specific about \
+the exact wording of the instruction to add or modify.
+TARGET_EVAL: which failing eval this addresses
+APPROACH: APPEND (add new rule) | REPLACE (modify existing text) | PREPEND
+
+Rules:
+- Propose concrete instructions, not vague improvements.
+- GOOD: "Add a rule stating: do not add conversational preamble or \
+introductory text before the to-do list"
+- BAD: "Improve the consistency instructions"
+- Do NOT propose deleting or shortening existing instructions.
+- Each idea should address exactly one failing eval."""
+
+
+_EXECUTION_SYSTEM = """\
+You are a precise prompt editor. You will receive an edit plan and a prompt \
+template. Your job is to produce the EXACT structured edit to implement \
+the plan.
+
+You MUST respond in this exact format — no other text:
+
 ACTION: REPLACE | APPEND | PREPEND
 FIND: (REPLACE only) exact text copied from the prompt — no quotes
 REPLACE_WITH: (REPLACE only) replacement text — no quotes
@@ -42,15 +60,10 @@ APPEND_TEXT: (APPEND only) text to add at the end
 PREPEND_TEXT: (PREPEND only) text to add at the beginning
 
 Rules:
-- FIND must be an EXACT substring copied verbatim from the prompt.
+- FIND must be an EXACT substring copied character-for-character from the prompt.
 - Do NOT wrap any field values in quotation marks.
-- Add specific, concrete instructions. Vague edits do not help.
-- GOOD: APPEND_TEXT that says "Do not add introductory text before the list."
-- BAD: Removing "You are a productivity assistant" from the prompt.
-- Prefer APPEND to add new constraints. Use REPLACE only to modify existing \
-instructions, not to delete them.
-- Do not regress passing evals.
-- Each edit should address exactly one failing eval."""
+- Do NOT add your own commentary or rationale — just the structured edit.
+- Implement the plan precisely as described."""
 
 
 # ---------------------------------------------------------------------------
@@ -91,17 +104,21 @@ ISSUES:
     if eval_results:
         failing = [r for r in eval_results if not r.passed]
         passing = [r for r in eval_results if r.passed]
+        overall = sum(r.score for r in eval_results) / len(eval_results) if eval_results else 0
+        prompt += f"\n\nOVERALL SCORE: {overall:.1f}/10 (target: 9.0/10)"
         if failing:
             fail_text = []
             for r in failing:
-                line = f"- FAIL {r.eval_id} (score={r.score:.2f})"
+                line = f"- FAIL {r.eval_id} ({r.score:.1f}/10)"
                 if r.details:
                     line += f" — {r.details}"
                 fail_text.append(line)
             prompt += f"\n\nFAILING EVALS:\n{chr(10).join(fail_text)}"
         if passing:
-            pass_text = [f"- PASS {r.eval_id}" for r in passing]
+            pass_text = [f"- PASS {r.eval_id} ({r.score:.1f}/10)" for r in passing]
             prompt += f"\n\nPASSING EVALS (do not regress):\n{chr(10).join(pass_text)}"
+        if not failing:
+            prompt += "\n\nAll evals are passing. Focus on strengthening the weakest eval."
 
     if edit_history:
         history_lines = []
@@ -110,30 +127,103 @@ ISSUES:
             action = entry.get("action", "?")
             line = f"- [{status}] ({action}) {entry['rationale']}"
             history_lines.append(line)
-        prompt += f"\n\nPREVIOUS EDIT ATTEMPTS:\n"
+        prompt += f"\n\nPREVIOUS EDIT ATTEMPTS (do NOT repeat these):\n"
         prompt += chr(10).join(history_lines)
 
-    # Detect plateau: score hasn't improved in several iterations
+    # Detect plateau and repetition — escalating tiers
     warnings = []
-    if stall_count >= 3:
-        # Count consecutive appends in history
-        recent_appends = sum(
-            1 for e in (edit_history or [])[-5:]
-            if e.get("action") == "APPEND"
+    n_history = len(edit_history) if edit_history else 0
+
+    # Detect idea repetition
+    repeat_detected = False
+    if edit_history and len(edit_history) >= 3:
+        recent_rationales = [e.get("rationale", "") for e in edit_history[-5:]]
+        if len(recent_rationales) >= 3:
+            first_words = set(recent_rationales[0].lower().split())
+            similar_count = sum(
+                1 for r in recent_rationales[1:]
+                if first_words and set(r.lower().split())
+                and len(first_words & set(r.lower().split())) / min(len(first_words), len(set(r.lower().split()))) > 0.6
+            )
+            repeat_detected = similar_count >= 2
+
+    # Escalation tiers based on combined signals
+    plateau_depth = max(stall_count, n_history // 2 if repeat_detected else 0)
+
+    # Tier 3: Force a specific prescribed strategy (rotate through list)
+    _FORCED_STRATEGIES = [
+        (
+            "REWRITE THE EXAMPLE. The example in the prompt may be teaching "
+            "the LLM the wrong behavior. Use REPLACE to change the example "
+            "so it demonstrates the correct output for the failing eval."
+        ),
+        (
+            "ADD A NEGATIVE EXAMPLE. Show the LLM what NOT to produce. "
+            "APPEND a line like 'BAD example: ...' or 'Do NOT produce output "
+            "like: ...' that illustrates the exact failure the eval catches."
+        ),
+        (
+            "SIMPLIFY AND COMBINE. The prompt may have too many weak rules. "
+            "Use REPLACE to merge 2-3 existing rules into ONE strong, "
+            "specific instruction that directly addresses the failing eval."
+        ),
+        (
+            "REMOVE A CONFUSING RULE. An existing instruction may conflict "
+            "with what you want. Use REPLACE to shorten or remove a rule "
+            "that might be causing the LLM to produce the wrong output."
+        ),
+        (
+            "CHANGE THE FRAMING. Instead of adding rules, change HOW the "
+            "prompt frames the task. Use REPLACE to reword the main "
+            "instruction so the LLM naturally avoids the failing behavior."
+        ),
+        (
+            "ADD A CHECKLIST. APPEND a self-check instruction like "
+            "'Before outputting, verify: [specific check for failing eval]. "
+            "If the check fails, revise your output.'"
+        ),
+        (
+            "REORDER FOR PROMINENCE. LLMs pay most attention to the start "
+            "and end of a prompt. Use REPLACE to move the most important "
+            "rule (the one the failing eval checks) to the very beginning "
+            "of the rules section, or repeat it at the end for emphasis."
+        ),
+        (
+            "BAN SPECIFIC WORDS. Look at the failing eval details to find "
+            "exact words or phrases the LLM keeps producing incorrectly. "
+            "APPEND a rule that explicitly bans those words, e.g. "
+            "'Do NOT reorganize items into priority sections or categories.'"
+        ),
+    ]
+
+    if plateau_depth >= 8 or (repeat_detected and n_history >= 12):
+        # Tier 3: Assign a specific strategy — rotate through the list
+        strategy_idx = n_history % len(_FORCED_STRATEGIES)
+        strategy = _FORCED_STRATEGIES[strategy_idx]
+        warnings.append(
+            f"MANDATORY STRATEGY: You have been assigned this specific "
+            f"approach. You MUST follow it exactly:\n\n{strategy}\n\n"
+            f"Do NOT propose anything else. Do NOT repeat a previous idea."
         )
-        if stall_count >= 6 or recent_appends >= 4:
-            warnings.append(
-                "CRITICAL: The score has not improved over many iterations and "
-                "recent edits have been APPEND-only. You MUST use REPLACE to "
-                "rewrite or consolidate existing instructions. Do NOT use APPEND."
-            )
-        else:
-            warnings.append(
-                "The score has not improved in the last several iterations. "
-                "Try a COMPLETELY DIFFERENT approach — target a different "
-                "failing eval, use REPLACE instead of APPEND, or phrase the "
-                "instruction in a fundamentally new way."
-            )
+    elif plateau_depth >= 5 or (repeat_detected and n_history >= 6):
+        # Tier 2: Strong redirection with suggestions
+        warnings.append(
+            "CRITICAL: Your recent ideas are too similar and the score is "
+            "not improving. You MUST try something fundamentally different:\n"
+            "- Target a DIFFERENT failing eval than your last attempt\n"
+            "- Address the root cause instead of the symptom\n"
+            "- Use REPLACE to rewrite an existing instruction rather than "
+            "adding new ones\n"
+            "- Consider whether the example in the prompt contradicts your rule\n"
+            "- Think about what the LLM is actually doing wrong and WHY"
+        )
+    elif plateau_depth >= 3 or repeat_detected:
+        # Tier 1: Gentle nudge
+        warnings.append(
+            "The score has not improved recently. Try a different approach — "
+            "target a different failing eval, use REPLACE instead of APPEND, "
+            "or phrase the instruction in a fundamentally new way."
+        )
 
     # Detect repetitive prompt: find concrete duplicate lines
     dupes = _find_duplicate_lines(original_prompt)
@@ -207,6 +297,184 @@ def _is_similar_to_existing(new_text: str, original: str, threshold: float = 0.6
     return False
 
 
+def _find_similar_lines(text: str, threshold: float = 0.8) -> list[list[str]]:
+    """Find groups of lines that are similar to each other by word overlap.
+
+    Returns groups of 2+ similar lines (each group is a list of line texts).
+    """
+    lines = [ln.strip() for ln in text.split('\n') if len(ln.strip()) > 30]
+    groups: list[list[str]] = []
+    used: set[int] = set()
+
+    for i, a in enumerate(lines):
+        if i in used:
+            continue
+        a_words = set(a.lower().split())
+        group = [a]
+        for j, b in enumerate(lines):
+            if j <= i or j in used:
+                continue
+            b_words = set(b.lower().split())
+            overlap = len(a_words & b_words) / min(len(a_words), len(b_words))
+            if overlap >= threshold:
+                group.append(b)
+                used.add(j)
+        if len(group) > 1:
+            used.add(i)
+            groups.append(group)
+
+    return groups
+
+
+_CONSOLIDATE_SYSTEM = """\
+You are a prompt editor. The prompt below contains redundant or near-duplicate \
+instructions. Your job is to consolidate them into a single clear rule.
+
+You MUST respond in this format:
+
+RATIONALE: one sentence explaining what you consolidated
+ACTION: REPLACE
+FIND: the first redundant line (copied exactly from the prompt — no quotes)
+REPLACE_WITH: a single consolidated instruction that covers all the redundant lines
+
+Rules:
+- FIND must be an exact substring from the prompt.
+- REPLACE_WITH should be ONE clear rule that replaces ALL the redundant lines.
+- Do NOT wrap values in quotation marks.
+- After this edit, the other redundant lines will be removed automatically."""
+
+
+def consolidate_redundant_lines(
+    prompt_text: str,
+    llm_client: LLMClient,
+) -> tuple[str, str, str]:
+    """Detect and consolidate redundant lines in a prompt.
+
+    Returns:
+        Tuple of (consolidated_prompt, rationale, raw_response).
+        If no redundancy found, returns (prompt_text, "", "").
+    """
+    # Find similar lines
+    groups = _find_similar_lines(prompt_text)
+    dupes = _find_duplicate_lines(prompt_text)
+
+    # Merge both detection methods
+    all_redundant: list[list[str]] = []
+    seen_lines: set[str] = set()
+    for group in groups:
+        key = frozenset(ln.lower() for ln in group)
+        if key not in seen_lines:
+            all_redundant.append(group)
+            seen_lines.add(key)
+    for line_text, count in dupes:
+        if not any(line_text in g for g in all_redundant):
+            all_redundant.append([line_text] * count)
+
+    if not all_redundant:
+        return prompt_text, "", ""
+
+    # Show the LLM the prompt and the redundant groups
+    numbered = _add_line_numbers(prompt_text)
+    redundant_text = []
+    for i, group in enumerate(all_redundant[:3], 1):
+        redundant_text.append(f"Group {i} ({len(group)} similar lines):")
+        for ln in group:
+            redundant_text.append(f"  - {ln[:100]}{'...' if len(ln) > 100 else ''}")
+
+    user_prompt = f"""PROMPT TO EDIT:
+{numbered}
+
+REDUNDANT LINES TO CONSOLIDATE:
+{chr(10).join(redundant_text)}
+
+Produce a REPLACE edit that replaces the first line of the first group with \
+a single consolidated instruction, then I will remove the other duplicates."""
+
+    raw_response = llm_client.generate(
+        user_prompt,
+        system=_CONSOLIDATE_SYSTEM,
+        temperature=0.3,
+    )
+
+    improved, rationale, success, action = _apply_edit(prompt_text, raw_response)
+
+    if success:
+        # Remove the other redundant lines (all except the one we replaced)
+        for group in all_redundant:
+            for ln in group[1:]:
+                # Remove the line if it still exists
+                lines = improved.split('\n')
+                cleaned = []
+                removed = False
+                for l in lines:
+                    if not removed and l.strip() == ln.strip():
+                        removed = True
+                        continue
+                    cleaned.append(l)
+                improved = '\n'.join(cleaned)
+
+        # Clean up any triple+ blank lines
+        while '\n\n\n' in improved:
+            improved = improved.replace('\n\n\n', '\n\n')
+
+    return improved, rationale, raw_response
+
+
+_SIMPLIFY_SYSTEM = """\
+You are a prompt editor. Your job is to simplify a prompt template by making \
+it shorter and clearer WITHOUT changing its meaning or losing any rules.
+
+You will make ONE simplification at a time. Choose the highest-impact change:
+- Merge rules that say the same thing in different words
+- Remove redundant qualifiers or filler phrases
+- Combine multiple bullet points into one concise rule
+- Remove instructions that are implied by other instructions
+
+IMPORTANT: Do NOT remove any rule or constraint that is not covered by \
+another rule. Every behavior the prompt currently controls must still be \
+controlled after your edit.
+
+Respond in EXACTLY this format:
+
+RATIONALE: one sentence explaining what you simplified
+ACTION: REPLACE
+FIND: exact text from the prompt — no quotes
+REPLACE_WITH: simplified version — no quotes
+
+If the prompt cannot be simplified further, respond with exactly:
+DONE"""
+
+
+def simplify_prompt(
+    prompt_text: str,
+    llm_client: LLMClient,
+) -> tuple[str, str, bool]:
+    """Apply one simplification step to a prompt.
+
+    Returns:
+        Tuple of (simplified_prompt, rationale, changed).
+        If no simplification possible, returns (prompt_text, "", False).
+    """
+    numbered = _add_line_numbers(prompt_text)
+
+    user_prompt = f"""PROMPT TO SIMPLIFY:
+{numbered}
+
+Make ONE simplification. If nothing can be simplified, respond with DONE."""
+
+    raw_response = llm_client.generate(
+        user_prompt,
+        system=_SIMPLIFY_SYSTEM,
+        temperature=0.3,
+    )
+
+    if raw_response.strip() == "DONE":
+        return prompt_text, "", False
+
+    improved, rationale, success, action = _apply_edit(prompt_text, raw_response)
+    return improved, rationale, success
+
+
 # ---------------------------------------------------------------------------
 # Parse and apply edit
 # ---------------------------------------------------------------------------
@@ -246,7 +514,7 @@ def _parse_field(response: str, field: str) -> str | None:
     return None
 
 
-def _apply_edit(original: str, response: str) -> tuple[str, str, bool, str]:
+def _apply_edit(original: str, response: str, *, force: bool = False) -> tuple[str, str, bool, str]:
     """Parse the structured edit response and apply it to the original prompt.
 
     Returns:
@@ -285,8 +553,8 @@ def _apply_edit(original: str, response: str) -> tuple[str, str, bool, str]:
         append_text = _parse_field(response, "APPEND_TEXT:")
         if append_text:
             append_text = _unescape_literals(append_text)
-            # Reject if too similar to existing content
-            if _is_similar_to_existing(append_text, original):
+            # Reject if too similar to existing content (unless forced via directive)
+            if not force and _is_similar_to_existing(append_text, original):
                 return original, rationale + " (APPEND rejected — too similar to existing text, use REPLACE to consolidate)", False, action
             edited = original.rstrip() + "\n\n" + append_text
             return edited, rationale, True, action
@@ -306,108 +574,117 @@ def _apply_edit(original: str, response: str) -> tuple[str, str, bool, str]:
 # Self-review: let the LLM critique and revise its own edit
 # ---------------------------------------------------------------------------
 
-_REVIEW_SYSTEM = """\
-You are a prompt edit reviewer. You will see a proposed edit to a prompt \
-template and the failing evals it is trying to fix. Your job is to decide \
-whether the edit is good, and if not, produce a better one.
-
-Common problems with edits:
-- Too specific: targets one example instead of writing a general rule
-- Redundant: says the same thing as an existing instruction in different words
-- Too vague: says "ensure consistency" without concrete guidance
-- Wrong level: tries to fix the prompt text itself instead of adding an \
-instruction that controls the LLM's output behavior
-
-Respond in EXACTLY this format:
-
-VERDICT: GOOD | REVISE
-REASON: one sentence explaining your verdict
-(if REVISE, also include the revised edit in the same structured format:)
-ACTION: REPLACE | APPEND | PREPEND
-FIND: (REPLACE only) exact text from the prompt — no quotes
-REPLACE_WITH: (REPLACE only) replacement text — no quotes
-APPEND_TEXT: (APPEND only) text to add at the end
-PREPEND_TEXT: (PREPEND only) text to add at the beginning"""
-
-
-def _build_review_prompt(
-    original_prompt: str,
-    proposed_edit: str,
-    eval_results: list[EvalResult] | None = None,
+def _execute_idea(
+    original: str,
+    idea_response: str,
+    llm_client: LLMClient,
 ) -> str:
-    """Build a prompt for the self-review step."""
-    numbered = _add_line_numbers(original_prompt)
+    """Turn an idea into a precise structured edit.
 
-    prompt = f"""CURRENT PROMPT:
+    The ideation step produces a high-level plan (IDEA/TARGET_EVAL/APPROACH).
+    This step produces the exact structured edit (ACTION/FIND/REPLACE_WITH).
+
+    Returns the raw structured edit response.
+    """
+    numbered = _add_line_numbers(original)
+
+    exec_prompt = f"""PROMPT TO EDIT (with line numbers):
 {numbered}
 
-PROPOSED EDIT:
-{proposed_edit}"""
+EDIT PLAN:
+{idea_response}
 
-    if eval_results:
-        failing = [r for r in eval_results if not r.passed]
-        if failing:
-            fail_text = []
-            for r in failing:
-                line = f"- FAIL {r.eval_id} (score={r.score:.2f})"
-                if r.details:
-                    line += f" — {r.details}"
-                fail_text.append(line)
-            prompt += f"\n\nFAILING EVALS THIS EDIT SHOULD FIX:\n{chr(10).join(fail_text)}"
+Produce the exact structured edit to implement this plan. Copy text from \
+the prompt precisely — character for character."""
 
-    prompt += """
-
-Review this edit. Is it specific enough? Is it general rather than targeting \
-one narrow example? Does it duplicate existing instructions? Would it actually \
-fix the failing evals?"""
-
-    return prompt
-
-
-def _review_edit(
-    original: str,
-    raw_response: str,
-    llm_client: LLMClient,
-    eval_results: list[EvalResult] | None = None,
-) -> str:
-    """Review a proposed edit and optionally revise it.
-
-    Returns the (possibly revised) raw edit response.
-    """
-    review_prompt = _build_review_prompt(original, raw_response, eval_results)
-    review_response = llm_client.generate(
-        review_prompt,
-        system=_REVIEW_SYSTEM,
-        temperature=0.3,
+    exec_response = llm_client.generate(
+        exec_prompt,
+        system=_EXECUTION_SYSTEM,
+        temperature=0.2,
     )
 
-    # Log the review
+    # Log the execution
     from prompterator.runners.llm import _debug_enabled, _debug_dir
     if _debug_enabled and _debug_dir is not None:
         logs = sorted(_debug_dir.glob("debug-*.log"))
         if logs:
             with open(logs[-1], "a") as _f:
-                _f.write(f"\n--- REVIEW ---\n{review_response}\n")
+                _f.write(f"\n--- EXECUTE ---\n{exec_response}\n")
 
-    # Parse verdict
-    verdict_match = re.search(r'^VERDICT:\s*(GOOD|REVISE)', review_response, re.MULTILINE | re.IGNORECASE)
-    if not verdict_match:
-        return raw_response  # Can't parse, use original
+    # Carry the rationale from the idea into the edit
+    idea_text = _parse_field(idea_response, "IDEA:") or ""
+    # Prepend RATIONALE if the executor didn't include one
+    if not re.search(r'^RATIONALE:', exec_response, re.MULTILINE):
+        exec_response = f"RATIONALE: {idea_text}\n{exec_response}"
 
-    verdict = verdict_match.group(1).upper()
-    if verdict == "GOOD":
-        return raw_response
+    return exec_response
 
-    # Extract the revised edit from the review response
-    # Look for ACTION: in the review response (after VERDICT/REASON)
-    action_match = re.search(r'^ACTION:', review_response, re.MULTILINE)
-    if action_match:
-        # Extract rationale from REASON field, then build a new edit response
-        reason = _parse_field(review_response, "REASON:") or "Revised by reviewer"
-        revised_body = review_response[action_match.start():]
-        return f"RATIONALE: {reason}\n{revised_body}"
 
-    return raw_response
+# ---------------------------------------------------------------------------
+# Help request generation
+# ---------------------------------------------------------------------------
+
+_HELP_SYSTEM = """\
+You are a prompt tuning assistant. The automated tuning loop has plateaued — \
+it cannot improve the prompt further. Your job is to write a short, concrete \
+request for human help.
+
+Respond in this format:
+
+STUCK ON: [which eval(s) are still failing]
+TRIED: [brief summary of what edits were attempted]
+PROBLEM: [why the edits aren't working — be specific]
+SUGGESTION: [what a human could do to help — e.g. rewrite a section, \
+add an example, change the eval criteria, or provide a directive]
+
+Keep it concise — 1-2 sentences per field."""
+
+
+def generate_help_request(
+    prompt_text: str,
+    issue_file: IssueFile,
+    llm_client: LLMClient,
+    eval_results: list[EvalResult] | None = None,
+    edit_history: list[dict] | None = None,
+) -> str:
+    """Generate a help request when tuning plateaus.
+
+    Returns:
+        Human-readable help request string.
+    """
+    numbered = _add_line_numbers(prompt_text)
+
+    parts = [f"CURRENT PROMPT:\n{numbered}"]
+
+    if eval_results:
+        failing = [r for r in eval_results if not r.passed]
+        if failing:
+            fail_lines = []
+            for r in failing:
+                line = f"- FAIL {r.eval_id} (score={r.score:.2f})"
+                if r.details:
+                    line += f" — {r.details}"
+                fail_lines.append(line)
+            parts.append(f"STILL FAILING:\n{chr(10).join(fail_lines)}")
+
+    if edit_history:
+        history_lines = []
+        for entry in edit_history[-10:]:
+            status = "ACCEPTED" if entry.get("accepted") else "REJECTED"
+            action = entry.get("action", "?")
+            history_lines.append(f"- [{status}] ({action}) {entry['rationale']}")
+        parts.append(f"EDIT HISTORY:\n{chr(10).join(history_lines)}")
+
+    user_prompt = "\n\n".join(parts)
+
+    try:
+        return llm_client.generate(
+            user_prompt,
+            system=_HELP_SYSTEM,
+            temperature=0.3,
+        )
+    except Exception:
+        return "Tuning plateaued but could not generate a help request."
 
 
 # ---------------------------------------------------------------------------
@@ -480,25 +757,33 @@ def generate_improved_prompt_with_rationale(
         stall_count=stall_count,
     )
 
-    system = _EDIT_SYSTEM
+    # Step 1: Ideation — creative, higher temperature
+    # Temperature ramps up with plateau depth to force divergent thinking.
+    n_attempts = len(edit_history) if edit_history else 0
+    plateau_signal = max(stall_count, n_attempts // 2)
+    ideation_temp = min(0.7 + plateau_signal * 0.06, 1.2)
+
+    system = _IDEATION_SYSTEM
     if directive:
         system += (
             f"\n\nThe user has given you a specific directive. Focus on this "
             f"above all else:\n{directive}"
         )
 
-    raw_response = llm_client.generate(
+    idea_response = llm_client.generate(
         edit_prompt,
         system=system,
-        temperature=0.4,
+        temperature=ideation_temp,
     )
 
-    # Self-review: let the LLM critique and optionally revise its own edit
-    raw_response = _review_edit(
-        prompt_text, raw_response, llm_client, eval_results,
+    # Step 2: Execution — precise, low temperature
+    raw_response = _execute_idea(
+        prompt_text, idea_response, llm_client,
     )
 
-    improved, rationale, success, action = _apply_edit(prompt_text, raw_response)
+    improved, rationale, success, action = _apply_edit(
+        prompt_text, raw_response, force=bool(directive),
+    )
 
     # Debug: log parse results
     from prompterator.runners.llm import _debug_enabled, _debug_dir

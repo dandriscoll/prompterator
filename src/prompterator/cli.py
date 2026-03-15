@@ -17,6 +17,7 @@ from prompterator.commands.howto import howto_cmd
 from prompterator.commands.improve import improve_cmd
 from prompterator.commands.init import init_cmd
 from prompterator.commands.issues import issues_cmd
+from prompterator.commands.simplify import simplify_cmd
 from prompterator.commands.status import status_cmd
 from prompterator.commands.test import test_cmd
 from prompterator.commands.tune import tune_cmd
@@ -76,6 +77,7 @@ for _cmd in (
     generate_cmd,
     improve_cmd,
     issues_cmd,
+    simplify_cmd,
     test_cmd,
     tune_cmd,
 ):
@@ -90,6 +92,7 @@ main.add_command(evals_cmd)
 main.add_command(calibrate_cmd)
 main.add_command(improve_cmd)
 main.add_command(test_cmd)
+main.add_command(simplify_cmd)
 main.add_command(status_cmd)
 main.add_command(collect_cmd)
 main.add_command(tune_cmd)

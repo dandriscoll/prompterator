@@ -31,7 +31,7 @@ several reasons:
    prompt content collides with markdown in the prompt itself.
 
 3. **Commentary injection** — The LLM embeds its own commentary ("I've
-   improved the greeting rules") inside the prompt text.
+   improved the to-do list rules") inside the prompt text.
 
 The structured edit format solves all three: the LLM never outputs prompt text
 directly. It outputs a *recipe* (FIND this, REPLACE WITH that) which Python
@@ -109,18 +109,25 @@ The last 8 edit attempts (rationale, action type, accepted/rejected) are
 shown to the editor LLM. This prevents the model from proposing the same
 edit repeatedly and lets it learn from what worked.
 
-## Self-Review via the Formalism
+## Two-Phase Edit: Ideation → Execution
 
-Because edits are structured data, they can be **reviewed by a second LLM
-pass** before application. The reviewer sees:
+Each edit is produced by two separate LLM calls with different temperatures:
 
-- The current prompt text
-- The proposed edit (ACTION, FIND, REPLACE_WITH / APPEND_TEXT)
-- The failing evals
+1. **Ideation** (temperature 0.7+): The LLM acts as a strategist, proposing
+   what to change and why. It outputs a high-level plan (IDEA, TARGET_EVAL,
+   APPROACH) without needing to produce exact text. Higher temperature
+   encourages creative, diverse approaches. The temperature increases further
+   with `stall_count` (up to 1.0) to force divergent thinking when stuck.
 
-And can reject or revise the edit before `_apply_edit()` runs. This is
-possible *because* the edit is inspectable structured data, not an opaque
-rewritten prompt.
+2. **Execution** (temperature 0.2): A second call receives the idea and the
+   prompt text, and produces the precise structured edit (ACTION, FIND,
+   REPLACE_WITH). Low temperature ensures exact text matching and clean
+   formatting.
+
+This separation is possible *because* the edit is structured data. The
+ideation step doesn't need to copy text precisely — it just describes the
+change. The execution step doesn't need to be creative — it just implements
+the plan mechanically.
 
 ## Line Numbers
 

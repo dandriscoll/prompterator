@@ -7,7 +7,7 @@ import click
 from prompterator.config.loader import get_config_base_dir, load_config
 from prompterator.core.eval_runner import run_all_evals, save_result_file
 from prompterator.core.run import create_run_dir
-from prompterator.commands.resolve import ResolveError, resolve_prompt_and_evals
+from prompterator.commands.resolve import ResolveError, resolve_prompt_and_evals, resolve_content
 from prompterator.runners.critic_script import CriticScriptError
 from prompterator.runners.llm import LLMClient, LLMError
 
@@ -30,7 +30,20 @@ from prompterator.runners.llm import LLMClient, LLMError
     "-s",
     type=int,
     default=None,
-    help="Samples per eval (default: from config critic.samples)",
+    help="Author outputs per content file (default: from config critic.samples)",
+)
+@click.option(
+    "--ensemble",
+    "-e",
+    type=int,
+    default=None,
+    help="Critic evaluations per output (default: from config critic.ensemble)",
+)
+@click.option(
+    "--content",
+    "-c",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Content file to pair with the prompt (overrides config)",
 )
 @click.option(
     "--verbose",
@@ -43,6 +56,8 @@ def test_cmd(
     evals_path: Path | None,
     output: Path | None,
     samples: int | None,
+    ensemble: int | None,
+    content: Path | None,
     verbose: bool,
 ) -> None:
     """Run evaluations against a prompt and report results.
@@ -66,10 +81,23 @@ def test_cmd(
         raise SystemExit(1)
 
     n_samples = samples if samples is not None else config.critic.samples
+    n_ensemble = ensemble if ensemble is not None else config.critic.ensemble
+
+    # Resolve content files
+    content_texts = resolve_content(config, base_dir, content) or [None]
+    n_content = len(content_texts)
+    n_evals = len(eval_file.evals)
+    n_outputs = n_samples * n_content
+    n_author = n_outputs
+    n_critic = n_outputs * n_evals * n_ensemble
+    n_llm = n_author + n_critic
 
     click.echo(f"Testing: {prompt}")
-    click.echo(f"Evals: {len(eval_file.evals)} from {evals_path.name}")
-    click.echo(f"Samples: {n_samples}, confidence: {config.critic.confidence_threshold:.0%}")
+    click.echo(f"Evals: {n_evals} from {evals_path.name}")
+    if n_content > 1 or content_texts[0] is not None:
+        click.echo(f"Content files: {n_content}")
+    click.echo(f"Samples: {n_samples}, ensemble: {n_ensemble}, threshold: {config.critic.confidence_threshold:.1f}/10")
+    click.echo(f"LLM calls: {n_llm} ({n_author} author + {n_critic} critic)")
     click.echo()
 
     # Initialize LLMs
@@ -102,7 +130,9 @@ def test_cmd(
         result_file = run_all_evals(
             eval_file, prompt, llm,
             author_llm=author_llm,
+            content_texts=content_texts if content_texts != [None] else None,
             samples=n_samples,
+            ensemble=n_ensemble,
             confidence_threshold=config.critic.confidence_threshold,
             script=script, script_timeout=script_timeout,
         )
@@ -123,7 +153,7 @@ def test_cmd(
         status_color = "green" if result.passed else "red"
         click.echo(
             f"  [{click.style(status, fg=status_color)}] {result.eval_id} "
-            f"(score: {result.score:.2f})"
+            f"({result.score:.1f}/10)"
         )
         if verbose and result.details:
             click.echo(f"        {result.details}")
@@ -138,7 +168,7 @@ def test_cmd(
     click.echo(
         f"Verdict: {click.style(result_file.summary.verdict, fg=verdict_color, bold=True)}"
     )
-    click.echo(f"Score: {result_file.summary.overall_score:.2f}")
+    click.echo(f"Score: {result_file.summary.overall_score:.1f}/10")
     click.echo(
         f"Passed: {result_file.summary.passed_count}/{result_file.summary.passed_count + result_file.summary.failed_count}"
     )
