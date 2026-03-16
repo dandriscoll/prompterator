@@ -27,7 +27,14 @@ from prompterator.runners.llm import LLMClient
     is_flag=True,
     help="Show what would be created without writing files",
 )
-def evals_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> None:
+@click.option(
+    "--directive",
+    "-d",
+    type=str,
+    default=None,
+    help="Guidance for the LLM when generating eval criteria from issues",
+)
+def evals_cmd(directory: Path | None, output: Path | None, dry_run: bool, directive: str | None) -> None:
     """Generate .eval.yaml files from issues."""
     config = load_config()
     base_dir = get_config_base_dir()
@@ -78,6 +85,7 @@ def evals_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> Non
 
         eval_file = generate_evals_from_issues(
             issue_file, llm_client, existing_evals=existing_evals,
+            directive=directive,
         )
 
         if dry_run:

@@ -28,7 +28,14 @@ from prompterator.runners.llm import LLMClient
     is_flag=True,
     help="Show what would be created without writing files (still calls LLM for clustering)",
 )
-def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> None:
+@click.option(
+    "--directive",
+    "-d",
+    type=str,
+    default=None,
+    help="Guidance for the LLM when clustering feedback into issues",
+)
+def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool, directive: str | None) -> None:
     """Consolidate feedback into .issue.yaml files."""
     config = load_config()
     base_dir = get_config_base_dir()
@@ -97,6 +104,7 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool) -> No
             llm_client,
             config.feedback.min_occurrences,
             existing_issues=existing_issues,
+            directive=directive,
         )
 
         if not issue_file.issues:

@@ -68,7 +68,7 @@ def _generate_eval_id(prompt_ref: str, category: str, index: int) -> str:
 _MAX_CRITERIA_PER_ISSUE = 5
 
 
-def _criteria_from_issue(issue, llm_client: LLMClient | None = None) -> list[str]:
+def _criteria_from_issue(issue, llm_client: LLMClient | None = None, directive: str | None = None) -> list[str]:
     """Generate eval pass-criteria from an issue.
 
     Uses the LLM to invert the issue (problem description) into
@@ -77,7 +77,10 @@ def _criteria_from_issue(issue, llm_client: LLMClient | None = None) -> list[str
     """
     if llm_client is not None:
         try:
-            raw = llm_client.generate(issue.summary, system=_CRITERIA_SYSTEM)
+            system = _CRITERIA_SYSTEM
+            if directive:
+                system += f"\n\nADDITIONAL GUIDANCE FROM THE USER:\n{directive}"
+            raw = llm_client.generate(issue.summary, system=system)
             criteria = json.loads(raw)
             if isinstance(criteria, list) and criteria:
                 return [str(c) for c in criteria[:1]]
@@ -171,6 +174,7 @@ def generate_evals_from_issues(
     issue_file: IssueFile,
     llm_client: LLMClient | None = None,
     existing_evals: list[Eval] | None = None,
+    directive: str | None = None,
 ) -> EvalFile:
     """Generate evaluation specifications from issues.
 
@@ -206,7 +210,7 @@ def generate_evals_from_issues(
 
         # Use LLM to invert issue descriptions into pass-criteria.
         # Falls back to generic category criteria when no LLM or no details.
-        specific_criteria = _criteria_from_issue(issue, llm_client)
+        specific_criteria = _criteria_from_issue(issue, llm_client, directive=directive)
         if specific_criteria:
             criteria = specific_criteria
         else:
