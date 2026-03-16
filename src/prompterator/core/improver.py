@@ -104,8 +104,6 @@ ISSUES:
     if eval_results:
         failing = [r for r in eval_results if not r.passed]
         passing = [r for r in eval_results if r.passed]
-        overall = sum(r.score for r in eval_results) / len(eval_results) if eval_results else 0
-        prompt += f"\n\nOVERALL SCORE: {overall:.1f}/10 (target: 9.0/10)"
         if failing:
             fail_text = []
             for r in failing:
@@ -113,7 +111,7 @@ ISSUES:
                 if r.details:
                     line += f" — {r.details}"
                 fail_text.append(line)
-            prompt += f"\n\nFAILING EVALS:\n{chr(10).join(fail_text)}"
+            prompt += f"\n\nFAILING EVALS (pick one to fix):\n{chr(10).join(fail_text)}"
         if passing:
             pass_text = [f"- PASS {r.eval_id} ({r.score:.1f}/10)" for r in passing]
             prompt += f"\n\nPASSING EVALS (do not regress):\n{chr(10).join(pass_text)}"

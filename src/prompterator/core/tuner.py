@@ -299,20 +299,29 @@ def run_tuning_loop(
             snapshot_path = run_dir / f"{base_name}.{i:03d}.prompt{prompt_path.suffix}"
             snapshot_path.write_text(improved_text)
 
-        # Accept or reject: only move forward if score improved
-        accepted = new_summary.overall_score >= best_score
+        # Accept or reject per-eval: accept if any eval improved and
+        # no eval regressed beyond noise. This prevents the overall score
+        # from masking per-eval progress or regressions.
+        noise_margin = 5.0 / max(len(new_results), 1)
+        best_scores = {r.eval_id: r.score for r in best_results}
+        any_improved = False
+        any_regressed = False
+        for r in new_results:
+            prev = best_scores.get(r.eval_id, 0.0)
+            if r.score > prev + noise_margin:
+                any_improved = True
+            if r.score < prev - noise_margin:
+                any_regressed = True
+
+        accepted = any_improved and not any_regressed
         edit_history.append({
             "rationale": rationale,
             "action": edit_action,
             "accepted": accepted,
         })
 
-        # Use a noise margin so small score fluctuations from low sample
-        # counts don't cause false stalls or false improvements.
-        noise_margin = 5.0 / max(len(new_results), 1)
-
-        if new_summary.overall_score > best_score + noise_margin:
-            # Clear improvement beyond noise
+        if accepted:
+            # At least one eval improved, none regressed
             best_score = new_summary.overall_score
             best_text = improved_text
             best_results = new_results
@@ -323,19 +332,13 @@ def run_tuning_loop(
             # Write improved prompt to source file
             with open(prompt_path, "w") as f:
                 f.write(improved_text)
-        elif new_summary.overall_score >= best_score - noise_margin:
-            # Within noise band — accept to explore but don't update best
+        elif not any_regressed:
+            # No improvement but no regression — explore but don't update best
             current_text = improved_text
             previous_results = new_results
-            if new_summary.overall_score > best_score:
-                best_score = new_summary.overall_score
-                best_text = improved_text
-                best_results = new_results
-                with open(prompt_path, "w") as f:
-                    f.write(improved_text)
             stall_count += 1
         else:
-            # Clear regression — revert to best prompt
+            # Regression on at least one eval — revert to best prompt
             current_text = best_text
             previous_results = best_results
             stall_count += 1
