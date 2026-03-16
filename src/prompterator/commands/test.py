@@ -207,6 +207,18 @@ def test_cmd(
             click.echo(f"Critic LLM error: {e}", err=True)
             raise SystemExit(1)
 
+    # Create run dir early so debug logs land in it
+    base_name = prompt.stem.split(".")[0]
+    stem_parts = prompt.stem.split(".")
+    if len(stem_parts[0]) > 3 and stem_parts[0][3:4].isalpha():
+        base_name = stem_parts[0]
+
+    if output is not None:
+        run_dir = output if output.is_dir() else output.parent
+    else:
+        results_dir = config.get_dir("results", base_dir)
+        run_dir = create_run_dir(results_dir)
+
     # Run evaluations
     from prompterator.runners.llm import debug_context
     debug_context("test")
@@ -273,17 +285,6 @@ def test_cmd(
     )
 
     # Save results
-    base_name = prompt.stem.split(".")[0]
-    stem_parts = prompt.stem.split(".")
-    if len(stem_parts[0]) > 3 and stem_parts[0][3:4].isalpha():
-        base_name = stem_parts[0]
-
-    if output is not None:
-        run_dir = output if output.is_dir() else output.parent
-    else:
-        results_dir = config.get_dir("results", base_dir)
-        run_dir = create_run_dir(results_dir)
-
     save_result_file(result_file, run_dir / f"{base_name}.results.yaml")
     if result_file.generated_outputs:
         for i, output_text in enumerate(result_file.generated_outputs):

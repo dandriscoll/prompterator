@@ -126,6 +126,13 @@ def calibrate_cmd(
         click.echo(f"Critic LLM error: {e}", err=True)
         raise SystemExit(1)
 
+    # --- Create run dir early so debug logs land in it --------------------
+    base_name = prompt.stem.split(".")[0]
+    if output is None:
+        results_dir = config.get_dir("results", base_dir)
+        run_dir = create_run_dir(results_dir)
+        output = run_dir / f"{base_name}.calibration.yaml"
+
     # --- Run calibration --------------------------------------------------
     from prompterator.runners.llm import debug_context
     debug_context("calibrate")
@@ -195,12 +202,6 @@ def calibrate_cmd(
             needs_fix.append(cal)
 
     # --- Save report ------------------------------------------------------
-    base_name = prompt.stem.split(".")[0]
-    if output is None:
-        results_dir = config.get_dir("results", base_dir)
-        run_dir = create_run_dir(results_dir)
-        output = run_dir / f"{base_name}.calibration.yaml"
-
     report = CalibrationReport(
         prompt_ref=prompt_ref,
         eval_file=str(evals_path),
