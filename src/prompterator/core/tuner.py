@@ -213,6 +213,7 @@ def run_tuning_loop(
                 eval_results=previous_results, iteration=i,
                 edit_history=edit_history,
                 stall_count=stall_count,
+                eval_file=eval_file,
             )
             if improved_text != current_text:
                 break

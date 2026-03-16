@@ -230,7 +230,7 @@ def improve_cmd(
                 original_text = f.read()
             improved, rationale, _raw, _action = generate_improved_prompt_with_rationale(
                 original_text, issue_file, llm, eval_results=eval_results,
-                directive=directive,
+                directive=directive, eval_file=eval_file,
             )
             click.echo(f"Change: {rationale}")
         except LLMError as e:

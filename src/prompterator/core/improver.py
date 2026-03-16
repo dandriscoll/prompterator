@@ -8,6 +8,7 @@ see the prompt text and try to execute it instead of editing it.
 import re
 from pathlib import Path
 
+from prompterator.models.eval import Eval, EvalFile
 from prompterator.models.issue import IssueFile
 from prompterator.models.result import EvalResult
 from prompterator.runners.llm import LLMClient
@@ -84,6 +85,7 @@ def _build_edit_prompt(
     iteration: int | None = None,
     edit_history: list[dict] | None = None,
     stall_count: int = 0,
+    eval_file: EvalFile | None = None,
 ) -> str:
     """Build the prompt for the edit LLM call."""
     issues_text = []
@@ -102,6 +104,12 @@ ISSUES:
 {issues_section}"""
 
     if eval_results:
+        # Build eval spec lookup for criteria
+        eval_specs: dict[str, Eval] = {}
+        if eval_file:
+            for ev in eval_file.evals:
+                eval_specs[ev.id] = ev
+
         failing = [r for r in eval_results if not r.passed]
         passing = [r for r in eval_results if r.passed]
         if failing:
@@ -110,6 +118,11 @@ ISSUES:
                 line = f"- FAIL {r.eval_id} ({r.score:.1f}/10)"
                 if r.details:
                     line += f" — {r.details}"
+                # Include eval criteria so the improver knows what to fix
+                spec = eval_specs.get(r.eval_id)
+                if spec and spec.rubric and spec.rubric.criteria:
+                    for c in spec.rubric.criteria:
+                        line += f"\n    Criterion: {c}"
                 fail_text.append(line)
             prompt += f"\n\nFAILING EVALS (pick one to fix):\n{chr(10).join(fail_text)}"
         if passing:
@@ -743,6 +756,7 @@ def generate_improved_prompt_with_rationale(
     directive: str | None = None,
     edit_history: list[dict] | None = None,
     stall_count: int = 0,
+    eval_file: EvalFile | None = None,
 ) -> tuple[str, str, str, str]:
     """Generate an improved prompt via structured edit.
 
@@ -753,6 +767,7 @@ def generate_improved_prompt_with_rationale(
         prompt_text, issue_file, eval_results, iteration,
         edit_history=edit_history,
         stall_count=stall_count,
+        eval_file=eval_file,
     )
 
     # Step 1: Ideation — creative, higher temperature
