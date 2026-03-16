@@ -44,7 +44,7 @@ from prompterator.runners.llm import LLMClient, LLMError
     "-m",
     type=int,
     default=None,
-    help="Maximum iterations with early stopping on plateau (default: 20)",
+    help="Maximum iterations with early stopping on plateau (default: 10)",
 )
 @click.option(
     "--samples",
@@ -149,7 +149,7 @@ def tune_cmd(
         early_stop = False
     else:
         # Max mode (default): run up to N iterations with early stopping
-        n_iterations = max_runs if max_runs is not None else 20
+        n_iterations = max_runs if max_runs is not None else 10
         effective_patience = patience
         early_stop = True
 

@@ -122,9 +122,9 @@ class CriticConfig(LLMRoleConfig):
     )
     temperature: float = Field(default=0.3, ge=0.0, le=2.0, description="Sampling temperature")
     samples: int = Field(
-        default=3,
+        default=5,
         ge=1,
-        description="Number of eval samples per test run",
+        description="Number of author outputs per content file per test run",
     )
     ensemble: int = Field(
         default=5,
