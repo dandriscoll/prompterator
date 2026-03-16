@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from prompterator.core.progress import Progress
 from prompterator.models.eval import Eval, EvalFile
 from prompterator.models.feedback import Feedback
 from prompterator.models.issue import IssueFile
@@ -306,6 +307,33 @@ def _build_conversation_prompt(
     return "\n\n".join(parts)
 
 
+def estimate_eval_calls(
+    n_content: int,
+    n_evals: int,
+    samples: int,
+    ensemble: int,
+    *,
+    content_eval_map: dict[int, list[str]] | None = None,
+    dialog_turns: int = 1,
+    has_author: bool = True,
+) -> int:
+    """Estimate total LLM calls for a run_all_evals invocation."""
+    if has_author:
+        if dialog_turns > 1:
+            author_calls = n_content * samples * (2 * dialog_turns - 1)
+        else:
+            author_calls = n_content * samples
+    else:
+        author_calls = 0
+
+    if content_eval_map is not None:
+        critic_calls = sum(len(eids) for eids in content_eval_map.values()) * samples * ensemble
+    else:
+        critic_calls = n_content * samples * n_evals * ensemble
+
+    return author_calls + critic_calls
+
+
 def map_content_to_evals(
     content_paths: list[Path],
     feedback_list: list[Feedback],
@@ -380,6 +408,7 @@ def run_all_evals(
     counterpart_llm: LLMClient | None = None,
     counterpart_directions: list[str] | None = None,
     dialog_turns: int = 3,
+    progress: Progress | None = None,
 ) -> ResultFile:
     """Generate output from a prompt and evaluate it with ensemble scoring.
 
@@ -412,6 +441,7 @@ def run_all_evals(
             instead of single-shot author generation. Directions are cycled
             if fewer than content files.
         dialog_turns: Number of author turns in multi-turn dialog (default 3).
+        progress: Optional Progress instance for live progress updates.
 
     Returns:
         ResultFile with aggregated results, summary, and last generated output.
@@ -465,8 +495,14 @@ def run_all_evals(
                     content_text=content_text,
                     turns=dialog_turns,
                 )
+                if progress:
+                    # Dialog uses (2*turns - 1) LLM calls
+                    for _ in range(2 * dialog_turns - 1):
+                        progress.tick("dialog")
             elif author_llm is not None:
                 output_content = author_llm.generate(user_msg, system=system_msg)
+                if progress:
+                    progress.tick("author")
             else:
                 output_content = user_msg
             last_output = output_content
@@ -484,6 +520,8 @@ def run_all_evals(
                         input_content=content_text,
                         script=script, script_timeout=script_timeout,
                     )
+                    if progress:
+                        progress.tick(eval_spec.id)
                     if result.passed:
                         passes += 1
                     elif result.details:

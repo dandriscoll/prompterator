@@ -96,6 +96,12 @@ from prompterator.runners.llm import LLMClient, LLMError
     show_default=True,
     help="Number of author turns in multi-turn dialog",
 )
+@click.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    help="Suppress live progress output",
+)
 def tune_cmd(
     prompt: Path | None,
     issues_path: Path | None,
@@ -110,6 +116,7 @@ def tune_cmd(
     all_evals: bool,
     counterpart: Path | None,
     dialog_turns: int,
+    quiet: bool,
 ) -> None:
     """Run the full tuning loop: improve → test → improve iteratively.
 
@@ -297,6 +304,7 @@ def tune_cmd(
             counterpart_llm=counterpart_llm_client,
             counterpart_directions=counterpart_directions or None,
             dialog_turns=dialog_turns,
+            quiet=quiet,
         )
     except LLMError as e:
         _clear_status()

@@ -5,7 +5,8 @@ from pathlib import Path
 import click
 
 from prompterator.config.loader import get_config_base_dir, load_config
-from prompterator.core.eval_runner import map_content_to_evals, run_all_evals, save_result_file
+from prompterator.core.eval_runner import estimate_eval_calls, map_content_to_evals, run_all_evals, save_result_file
+from prompterator.core.progress import Progress
 from prompterator.core.run import create_run_dir
 from prompterator.commands.resolve import (
     ResolveError,
@@ -75,6 +76,12 @@ from prompterator.runners.llm import LLMClient, LLMError
     show_default=True,
     help="Number of author turns in multi-turn dialog",
 )
+@click.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    help="Suppress live progress output",
+)
 def test_cmd(
     prompt: Path | None,
     evals_path: Path | None,
@@ -86,6 +93,7 @@ def test_cmd(
     all_evals: bool,
     counterpart: Path | None,
     dialog_turns: int,
+    quiet: bool,
 ) -> None:
     """Run evaluations against a prompt and report results.
 
@@ -202,6 +210,13 @@ def test_cmd(
     # Run evaluations
     from prompterator.runners.llm import debug_context
     debug_context("test")
+    total_calls = estimate_eval_calls(
+        n_content, n_evals, n_samples, n_ensemble,
+        content_eval_map=content_eval_map,
+        dialog_turns=dialog_turns if counterpart_directions else 1,
+        has_author=True,
+    )
+    progress = Progress(total_calls, label="Testing", quiet=quiet)
     click.echo("Running evaluations...")
     try:
         result_file = run_all_evals(
@@ -216,6 +231,7 @@ def test_cmd(
             counterpart_llm=counterpart_llm_client,
             counterpart_directions=counterpart_directions or None,
             dialog_turns=dialog_turns,
+            progress=progress,
         )
     except LLMError as e:
         click.echo(f"LLM error during evaluation: {e}", err=True)
@@ -223,6 +239,8 @@ def test_cmd(
     except CriticScriptError as e:
         click.echo(f"Critic script error: {e}", err=True)
         raise SystemExit(1)
+    finally:
+        progress.finish()
 
     # Display results
     click.echo()

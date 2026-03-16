@@ -6,7 +6,8 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from prompterator.core.eval_runner import run_all_evals, save_result_file
+from prompterator.core.eval_runner import estimate_eval_calls, run_all_evals, save_result_file
+from prompterator.core.progress import Progress
 from prompterator.core.improver import (
     generate_improved_prompt_with_rationale,
     generate_help_request,
@@ -36,6 +37,8 @@ def _run_evals_on_text(
     counterpart_llm: LLMClient | None = None,
     counterpart_directions: list[str] | None = None,
     dialog_turns: int = 3,
+    quiet: bool = False,
+    progress_label: str = "",
 ) -> ResultFile:
     """Generate output from prompt text and evaluate it.
 
@@ -45,6 +48,15 @@ def _run_evals_on_text(
     with tempfile.NamedTemporaryFile(mode="w", suffix=".prompt.txt", delete=False) as f:
         f.write(prompt_text)
         tmp_path = Path(f.name)
+
+    n_content = len(content_texts) if content_texts else 1
+    total_calls = estimate_eval_calls(
+        n_content, len(eval_file.evals), samples, ensemble,
+        content_eval_map=content_eval_map,
+        dialog_turns=dialog_turns if counterpart_directions else 1,
+        has_author=author_llm is not None,
+    )
+    progress = Progress(total_calls, label=progress_label, quiet=quiet)
 
     try:
         result_file = run_all_evals(
@@ -59,9 +71,11 @@ def _run_evals_on_text(
             counterpart_llm=counterpart_llm,
             counterpart_directions=counterpart_directions,
             dialog_turns=dialog_turns,
+            progress=progress,
         )
     finally:
         tmp_path.unlink(missing_ok=True)
+        progress.finish()
 
     return result_file
 
@@ -121,6 +135,7 @@ def run_tuning_loop(
     counterpart_llm: LLMClient | None = None,
     counterpart_directions: list[str] | None = None,
     dialog_turns: int = 3,
+    quiet: bool = False,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -168,6 +183,7 @@ def run_tuning_loop(
         counterpart_llm=counterpart_llm,
         counterpart_directions=counterpart_directions,
         dialog_turns=dialog_turns,
+        quiet=quiet, progress_label="Baseline",
     )
     baseline_results = baseline_rf.results
     baseline_summary = baseline_rf.summary
@@ -275,6 +291,7 @@ def run_tuning_loop(
             counterpart_llm=counterpart_llm,
             counterpart_directions=counterpart_directions,
             dialog_turns=dialog_turns,
+            quiet=quiet, progress_label=f"Iter {i}",
         )
         new_results = new_rf.results
         new_summary = new_rf.summary

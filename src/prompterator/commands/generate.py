@@ -75,6 +75,12 @@ def _resolve_content_files(config, base_dir: Path, cli_content: Path | None) -> 
     is_flag=True,
     help="Show the prompt that would be sent without calling the LLM",
 )
+@click.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    help="Suppress live progress output",
+)
 def generate_cmd(
     prompt: Path | None,
     system: str | None,
@@ -83,6 +89,7 @@ def generate_cmd(
     timeout: int,
     content: Path | None,
     dry_run: bool,
+    quiet: bool,
 ) -> None:
     """Run a prompt through the Author LLM and capture the output.
 
@@ -168,6 +175,9 @@ def generate_cmd(
 
     run_dir = create_run_dir(results_dir)
 
+    from prompterator.core.progress import Progress
+    progress = Progress(n_generations, label="Generating", quiet=quiet)
+
     for cf in content_files:
         content_text = cf.read_text() if cf else None
 
@@ -179,27 +189,25 @@ def generate_cmd(
         else:
             out_stem = prompt.stem.split(".")[0] + ".output"
 
-        if cf and len(content_files) > 1:
-            click.echo(f"Content: {cf.name}", err=True)
-
         for i in range(count):
             if count == 1:
                 out_path = run_dir / f"{out_stem}{out_suffix}"
             else:
                 out_path = run_dir / f"{out_stem}.{i + 1:03d}{out_suffix}"
 
-            if count > 1:
-                click.echo(f"  Generation {i + 1}/{count}", err=True)
-
             try:
                 result = generate_from_prompt(
                     prompt, llm, system=system, content=content_text,
                     timeout=timeout,
                 )
+                progress.tick(cf.name if cf else "")
             except LLMError as e:
+                progress.finish()
                 click.echo(f"LLM error: {e}", err=True)
                 raise SystemExit(1)
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(result + "\n")
-            click.echo(f"Saved: {out_path}", err=True)
+
+    progress.finish()
+    click.echo(f"Saved {n_generations} output(s) to: {run_dir}", err=True)
