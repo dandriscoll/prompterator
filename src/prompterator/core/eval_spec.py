@@ -77,10 +77,13 @@ def _criteria_from_issue(issue, llm_client: LLMClient | None = None, directive: 
     """
     if llm_client is not None:
         try:
-            system = _CRITERIA_SYSTEM
+            user_input = issue.summary
             if directive:
-                system += f"\n\nADDITIONAL GUIDANCE FROM THE USER:\n{directive}"
-            raw = llm_client.generate(issue.summary, system=system)
+                user_input = (
+                    f"IMPORTANT — follow this guidance when writing the criterion:\n"
+                    f"{directive}\n\nISSUE: {user_input}"
+                )
+            raw = llm_client.generate(user_input, system=_CRITERIA_SYSTEM)
             criteria = json.loads(raw)
             if isinstance(criteria, list) and criteria:
                 return [str(c) for c in criteria[:1]]

@@ -104,10 +104,12 @@ def consolidate_feedback(
     user_prompt = "\n".join(lines)
 
     # 3. Ask the LLM to cluster
-    system = _CLUSTER_SYSTEM
     if directive:
-        system += f"\n\nADDITIONAL GUIDANCE FROM THE USER:\n{directive}"
-    raw_response = llm_client.generate(user_prompt, system=system)
+        user_prompt = (
+            f"IMPORTANT — follow this guidance when clustering:\n{directive}\n\n"
+            + user_prompt
+        )
+    raw_response = llm_client.generate(user_prompt, system=_CLUSTER_SYSTEM)
 
     # Parse LLM response
     try:
