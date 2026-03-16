@@ -20,11 +20,14 @@ def classify_labels(
     issue_file: IssueFile,
     eval_spec: Eval,
 ) -> dict[str, str]:
-    """Classify feedback files as PASS or FAIL relative to an eval.
+    """Identify feedback sources that are known FAIL for an eval.
 
-    Uses the heuristic approach: files that appear in the issue's evidence
-    (linked via the eval's issue_ref) are labelled FAIL (negative);
-    all other feedback files are labelled PASS (positive).
+    Only sources that appear in the linked issue's evidence are labeled.
+    Sources without explicit evidence are omitted — absence of feedback
+    does not imply PASS (the reviewer may not have assessed that category).
+
+    Labels are keyed by both the .mb file basename and any source_ref
+    basenames from individual records, so lookups work at either level.
 
     Args:
         feedback_list: All parsed feedback objects for the prompt.
@@ -32,7 +35,8 @@ def classify_labels(
         issue_file: The issue file containing evidence mappings.
 
     Returns:
-        Dict mapping source file basename to "PASS" or "FAIL".
+        Dict mapping source basename to "FAIL" for known-bad sources.
+        Sources not in the dict were not assessed and should be skipped.
     """
     # Find the issue linked to this eval
     negative_sources: set[str] = set()
@@ -46,8 +50,14 @@ def classify_labels(
 
     labels: dict[str, str] = {}
     for fb in feedback_list:
-        name = Path(fb.source_file).name
-        labels[name] = "FAIL" if name in negative_sources else "PASS"
+        mb_name = Path(fb.source_file).name
+        if mb_name in negative_sources:
+            labels[mb_name] = "FAIL"
+        for entry in fb.entries:
+            if entry.source_ref:
+                src_name = Path(entry.source_ref).name
+                if src_name in negative_sources:
+                    labels[src_name] = "FAIL"
 
     return labels
 
@@ -55,6 +65,8 @@ def classify_labels(
 def _build_output_rubric_prompt(
     feedback_text: str,
     criteria: list[str],
+    *,
+    input_content: str | None = None,
 ) -> str:
     """Build a prompt for output-level rubric evaluation.
 
@@ -63,8 +75,21 @@ def _build_output_rubric_prompt(
     exhibits the problems described by the criteria.
     """
     criteria_list = "\n".join(f"- {c}" for c in criteria)
-    return f"""You are evaluating whether a specific output exhibits certain problems.
 
+    input_section = ""
+    if input_content:
+        input_section = f"""
+The output was generated from this input:
+
+INPUT:
+---
+{input_content}
+---
+
+"""
+
+    return f"""You are evaluating whether a specific output exhibits certain problems.
+{input_section}
 The output was reviewed by a human who provided the following feedback:
 
 FEEDBACK:
@@ -93,6 +118,8 @@ def run_calibration_eval(
     eval_spec: Eval,
     feedback_text: str,
     llm_client: LLMClient,
+    *,
+    input_content: str | None = None,
 ) -> bool:
     """Run a single eval against a feedback example's text.
 
@@ -102,8 +129,9 @@ def run_calibration_eval(
 
     Args:
         eval_spec: The eval specification.
-        feedback_text: Combined feedback text from the .mb file.
+        feedback_text: Feedback text from a single .mb record.
         llm_client: LLM client for critic calls.
+        input_content: The original input/content the author was given.
 
     Returns:
         True if eval passes (output does NOT have the problem), False otherwise.
@@ -112,7 +140,9 @@ def run_calibration_eval(
         return True
 
     criteria = eval_spec.rubric.criteria
-    prompt = _build_output_rubric_prompt(feedback_text, criteria)
+    prompt = _build_output_rubric_prompt(
+        feedback_text, criteria, input_content=input_content,
+    )
     system = "You are an expert evaluator. Be objective and thorough."
     response = llm_client.generate(prompt, system=system, temperature=0.3)
 
@@ -128,43 +158,70 @@ def compute_metrics(
 ) -> tuple[float, float, float, float, int, int]:
     """Compute calibration metrics from examples.
 
-    Convention: "positive" in the confusion-matrix sense means the eval
-    detected a problem (FAIL).  So:
+    Only examples with known FAIL labels are used (from issue evidence).
+    The key metric is detection rate: what fraction of known-bad outputs
+    does the eval correctly flag?
+
       - TP = eval FAIL and label FAIL (correctly detected problem)
-      - TN = eval PASS and label PASS (correctly found no problem)
-      - FP = eval FAIL but label PASS (false alarm)
       - FN = eval PASS but label FAIL (missed problem)
 
+    Precision and F1 are not meaningful without PASS-labeled examples
+    and are set to 1.0 by convention.
+
     Returns:
-        Tuple of (accuracy, precision, recall, f1, false_positives, false_negatives).
+        Tuple of (detection_rate, precision, recall, f1, false_positives, false_negatives).
+        detection_rate is TP / (TP + FN).
+        false_positives is always 0 (no PASS labels to contradict).
     """
     tp = sum(1 for e in examples if e.eval_result == "FAIL" and e.label == "FAIL")
-    tn = sum(1 for e in examples if e.eval_result == "PASS" and e.label == "PASS")
-    fp = sum(1 for e in examples if e.eval_result == "FAIL" and e.label == "PASS")
     fn = sum(1 for e in examples if e.eval_result == "PASS" and e.label == "FAIL")
 
-    total = tp + tn + fp + fn
-    accuracy = (tp + tn) / total if total > 0 else 0.0
+    total = tp + fn
+    detection_rate = tp / total if total > 0 else 0.0
 
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 1.0
+    # Without PASS-labeled examples, precision is undefined (no FP possible)
+    precision = 1.0
+    recall = detection_rate
     f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
 
-    return accuracy, precision, recall, f1, fp, fn
+    return detection_rate, precision, recall, f1, 0, fn
 
 
-def determine_verdict(accuracy: float) -> str:
-    """Determine calibration verdict from accuracy.
+def determine_verdict(detection_rate: float) -> str:
+    """Determine calibration verdict from detection rate.
 
     Returns:
         "GOOD" (>= 0.80), "WEAK" (>= 0.60), or "BAD" (< 0.60).
     """
-    if accuracy >= 0.80:
+    if detection_rate >= 0.80:
         return "GOOD"
-    elif accuracy >= 0.60:
+    elif detection_rate >= 0.60:
         return "WEAK"
     else:
         return "BAD"
+
+
+def _resolve_input_content(
+    prior_ref: str | None,
+    feedback_dir: Path | None,
+) -> str | None:
+    """Try to read the input/content file referenced by a prior_ref.
+
+    Returns the file contents if found, None otherwise.
+    """
+    if not prior_ref:
+        return None
+
+    ref_path = Path(prior_ref)
+    # Try as-is (absolute or relative to cwd)
+    if ref_path.exists():
+        return ref_path.read_text()
+    # Try relative to feedback directory
+    if feedback_dir is not None:
+        candidate = feedback_dir / ref_path
+        if candidate.exists():
+            return candidate.read_text()
+    return None
 
 
 def calibrate(
@@ -172,18 +229,22 @@ def calibrate(
     feedback_list: list[Feedback],
     issue_file: IssueFile,
     llm_client: LLMClient,
+    *,
+    feedback_dir: Path | None = None,
 ) -> list[CalibrationResult]:
     """Run calibration for all evals against labeled feedback.
 
-    For each eval, classifies feedback as positive/negative using issue
-    evidence, runs the eval against each feedback example, and computes
-    agreement metrics.
+    Each markback record is treated as an individual calibration row.
+    The record's source_ref identifies the output, and prior_ref
+    identifies the input content — both are used for label matching
+    and passed to the eval for alignment checking.
 
     Args:
         eval_file: The eval specifications to calibrate.
         feedback_list: All parsed feedback for the prompt.
         issue_file: Issue file for label classification.
         llm_client: LLM client for running evals.
+        feedback_dir: Directory containing .mb files (for resolving prior refs).
 
     Returns:
         List of CalibrationResult, one per eval.
@@ -195,25 +256,45 @@ def calibrate(
 
         examples: list[CalibrationExample] = []
         for fb in feedback_list:
-            name = Path(fb.source_file).name
-            label = labels.get(name, "PASS")
+            mb_name = Path(fb.source_file).name
+            mb_dir = Path(fb.source_file).parent
 
-            # Combine all feedback entries into a single text block
-            combined_text = " ".join(entry.text for entry in fb.entries)
-            if not combined_text.strip():
-                continue
+            for entry in fb.entries:
+                if not entry.text.strip():
+                    continue
 
-            eval_passed = run_calibration_eval(eval_spec, combined_text, llm_client)
-            eval_result = "PASS" if eval_passed else "FAIL"
+                # Determine label: prefer entry's source_ref, fall back to .mb file name
+                if entry.source_ref:
+                    src_name = Path(entry.source_ref).name
+                    label = labels.get(src_name, labels.get(mb_name))
+                else:
+                    src_name = mb_name
+                    label = labels.get(mb_name)
 
-            examples.append(
-                CalibrationExample(
-                    source=name,
-                    label=label,
-                    eval_result=eval_result,
-                    match=(label == eval_result),
+                # Skip entries without a known label — absence of feedback
+                # doesn't mean PASS (reviewer may not have assessed this category)
+                if label is None:
+                    continue
+
+                # Resolve input content from prior_ref
+                input_content = _resolve_input_content(
+                    entry.prior_ref, feedback_dir or mb_dir,
                 )
-            )
+
+                eval_passed = run_calibration_eval(
+                    eval_spec, entry.text, llm_client,
+                    input_content=input_content,
+                )
+                eval_result = "PASS" if eval_passed else "FAIL"
+
+                examples.append(
+                    CalibrationExample(
+                        source=src_name,
+                        label=label,
+                        eval_result=eval_result,
+                        match=(label == eval_result),
+                    )
+                )
 
         if not examples:
             continue
@@ -237,6 +318,90 @@ def calibrate(
         )
 
     return results
+
+
+_REVISE_CRITERIA_SYSTEM = """\
+You are an eval criteria editor. You will see an eval's rubric criteria and \
+examples where the eval MISSED a problem that a human identified. Your job \
+is to revise the criteria so they catch these missed problems.
+
+You will see:
+- The current criteria
+- MISSED (false negatives): the eval said PASS but the human said FAIL \
+— the criteria are too narrow or missing an important check
+
+Respond with ONLY a JSON array of revised criterion strings. \
+Keep the same number of criteria or fewer. Do not add markdown fences.
+
+Rules:
+- Make criteria BROADER to catch more real problems
+- If a criterion is fundamentally wrong, replace it entirely
+- Frame criteria as what the output must NOT do (absence of problem = PASS)
+- Each criterion should be one clear, testable sentence"""
+
+
+def revise_eval_criteria(
+    eval_spec: Eval,
+    calibration: CalibrationResult,
+    feedback_list: list[Feedback],
+    llm_client: LLMClient,
+) -> list[str] | None:
+    """Use calibration mismatches to revise eval criteria.
+
+    Args:
+        eval_spec: The eval whose criteria need revision.
+        calibration: The calibration result showing mismatches.
+        feedback_list: All parsed feedback (to look up text for examples).
+        llm_client: LLM client for generating revised criteria.
+
+    Returns:
+        Revised criteria list, or None if no revision needed.
+    """
+    if eval_spec.type != "rubric" or not eval_spec.rubric:
+        return None
+
+    # Collect missed examples (false negatives) with their feedback text
+    fn_examples = []
+    # Build lookup: source basename -> feedback text
+    fb_by_source: dict[str, list[str]] = {}
+    for fb in feedback_list:
+        for entry in fb.entries:
+            src = Path(entry.source_ref).name if entry.source_ref else Path(fb.source_file).name
+            fb_by_source.setdefault(src, []).append(entry.text)
+
+    for ex in calibration.examples:
+        if ex.match:
+            continue
+        if ex.eval_result == "PASS" and ex.label == "FAIL":
+            texts = fb_by_source.get(ex.source, [])
+            text_block = "; ".join(texts) if texts else "(no feedback text available)"
+            fn_examples.append(f"- {ex.source}: {text_block}")
+
+    if not fn_examples:
+        return None
+
+    criteria_text = "\n".join(f"- {c}" for c in eval_spec.rubric.criteria)
+
+    parts = [f"EVAL: {eval_spec.id}"]
+    if eval_spec.description:
+        parts.append(f"DESCRIPTION: {eval_spec.description}")
+    parts.append(f"\nCURRENT CRITERIA:\n{criteria_text}")
+    parts.append(
+        f"\nMISSED (eval said PASS, human said FAIL — "
+        f"criteria too narrow):\n" + "\n".join(fn_examples)
+    )
+    parts.append("\nRevise the criteria to catch these missed problems.")
+
+    import json
+    raw = llm_client.generate("\n".join(parts), system=_REVISE_CRITERIA_SYSTEM)
+    try:
+        revised = json.loads(raw)
+        if isinstance(revised, list) and revised:
+            return [str(c) for c in revised]
+    except (json.JSONDecodeError, Exception):
+        pass
+
+    return None
 
 
 def save_calibration_report(report: CalibrationReport, path: Path) -> None:
