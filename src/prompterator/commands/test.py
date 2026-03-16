@@ -267,7 +267,14 @@ def test_cmd(
         run_dir = create_run_dir(results_dir)
 
     save_result_file(result_file, run_dir / f"{base_name}.results.yaml")
-    if result_file.generated_output:
+    if result_file.generated_outputs:
+        for i, output_text in enumerate(result_file.generated_outputs):
+            if len(result_file.generated_outputs) == 1:
+                out_name = f"{base_name}.output.txt"
+            else:
+                out_name = f"{base_name}.output.{i + 1:03d}.txt"
+            (run_dir / out_name).write_text(output_text)
+    elif result_file.generated_output:
         (run_dir / f"{base_name}.output.txt").write_text(result_file.generated_output)
 
     click.echo(f"\nResults saved to: {run_dir}")

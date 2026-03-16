@@ -432,6 +432,7 @@ def run_all_evals(
         spec.id: [] for spec in eval_file.evals
     }
     last_output = None
+    all_outputs: list[str] = []
     n_outputs = samples * len(content_texts)
 
     # Determine if multi-turn dialog mode is active
@@ -469,6 +470,8 @@ def run_all_evals(
             else:
                 output_content = user_msg
             last_output = output_content
+            if author_llm is not None:
+                all_outputs.append(output_content)
 
             # Ensemble evaluate this output
             for eval_spec in active_evals:
@@ -551,6 +554,7 @@ def run_all_evals(
         version="1.0",
         prompt_tested=str(prompt_path),
         generated_output=last_output if author_llm is not None else None,
+        generated_outputs=all_outputs,
         results=results,
         summary=summary,
     )

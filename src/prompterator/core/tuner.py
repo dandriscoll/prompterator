@@ -36,11 +36,11 @@ def _run_evals_on_text(
     counterpart_llm: LLMClient | None = None,
     counterpart_directions: list[str] | None = None,
     dialog_turns: int = 3,
-) -> tuple[list, ResultSummary]:
+) -> ResultFile:
     """Generate output from prompt text and evaluate it.
 
     Returns:
-        Tuple of (eval_results, summary).
+        ResultFile with results, summary, and all generated outputs.
     """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".prompt.txt", delete=False) as f:
         f.write(prompt_text)
@@ -63,7 +63,7 @@ def _run_evals_on_text(
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    return result_file.results, result_file.summary
+    return result_file
 
 
 def _compute_metric_deltas(
@@ -157,7 +157,7 @@ def run_tuning_loop(
 
     # Run baseline evals
     debug_context("tune.baseline.eval")
-    baseline_results, baseline_summary = _run_evals_on_text(
+    baseline_rf = _run_evals_on_text(
         current_text, eval_file, critic_llm,
         author_llm=author_llm,
         content_texts=content_texts,
@@ -169,9 +169,16 @@ def run_tuning_loop(
         counterpart_directions=counterpart_directions,
         dialog_turns=dialog_turns,
     )
+    baseline_results = baseline_rf.results
+    baseline_summary = baseline_rf.summary
     previous_results = baseline_results
     best_score = baseline_summary.overall_score
     best_results = baseline_results
+
+    # Save baseline outputs
+    if run_dir is not None and baseline_rf.generated_outputs:
+        for j, out_text in enumerate(baseline_rf.generated_outputs):
+            (run_dir / f"{base_name}.baseline.output.{j + 1:03d}.txt").write_text(out_text)
     stall_count = 0
 
     def _status(msg: str) -> None:
@@ -256,7 +263,7 @@ def run_tuning_loop(
 
         # Run evals on improved prompt
         debug_context(f"tune.{i}.eval")
-        new_results, new_summary = _run_evals_on_text(
+        new_rf = _run_evals_on_text(
             improved_text, eval_file, critic_llm,
             author_llm=author_llm,
             content_texts=content_texts,
@@ -268,6 +275,8 @@ def run_tuning_loop(
             counterpart_directions=counterpart_directions,
             dialog_turns=dialog_turns,
         )
+        new_results = new_rf.results
+        new_summary = new_rf.summary
 
         # Compute deltas
         metric_deltas = _compute_metric_deltas(new_results, best_results)
@@ -288,16 +297,13 @@ def run_tuning_loop(
         if on_iteration:
             on_iteration(record)
 
-        # Save per-iteration results and prompt snapshot
+        # Save per-iteration results, outputs, and prompt snapshot
         if run_dir is not None:
-            result_file = ResultFile(
-                prompt_tested=str(prompt_path),
-                results=new_results,
-                summary=new_summary,
-            )
-            save_result_file(result_file, run_dir / f"{base_name}.{i:03d}.results.yaml")
+            save_result_file(new_rf, run_dir / f"{base_name}.{i:03d}.results.yaml")
             snapshot_path = run_dir / f"{base_name}.{i:03d}.prompt{prompt_path.suffix}"
             snapshot_path.write_text(improved_text)
+            for j, out_text in enumerate(new_rf.generated_outputs):
+                (run_dir / f"{base_name}.{i:03d}.output.{j + 1:03d}.txt").write_text(out_text)
 
         # Accept or reject per-eval: accept if any eval improved and
         # no eval regressed beyond noise. This prevents the overall score
