@@ -19,6 +19,7 @@ from prompterator.commands.init import init_cmd
 from prompterator.commands.issues import issues_cmd
 from prompterator.commands.simplify import simplify_cmd
 from prompterator.commands.status import status_cmd
+from prompterator.commands.summarize import summarize_cmd
 from prompterator.commands.test import test_cmd
 from prompterator.commands.tune import tune_cmd
 
@@ -99,6 +100,7 @@ main.add_command(tune_cmd)
 main.add_command(generate_cmd)
 main.add_command(guide_cmd)
 main.add_command(howto_cmd)
+main.add_command(summarize_cmd)
 
 
 if __name__ == "__main__":
