@@ -79,7 +79,16 @@ def evals_cmd(directory: Path | None, output: Path | None, dry_run: bool, direct
             try:
                 existing = load_eval_file(eval_path)
                 existing_evals = existing.evals
-                click.echo(f"  {issue_path.name}: merging with {len(existing_evals)} existing evals")
+                # Check for issue reorganization
+                new_ids = {issue.id for issue in issue_file.issues}
+                orphaned = [ev for ev in existing_evals if ev.issue_ref and ev.issue_ref not in new_ids]
+                if orphaned:
+                    click.echo(
+                        f"  {issue_path.name}: issues reorganized — reconciling "
+                        f"{len(existing_evals)} existing evals with {len(issue_file.issues)} new issues"
+                    )
+                else:
+                    click.echo(f"  {issue_path.name}: merging with {len(existing_evals)} existing evals")
             except Exception as e:
                 click.echo(f"  Warning: could not load {eval_path}: {e}", err=True)
 

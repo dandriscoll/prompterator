@@ -1,14 +1,20 @@
 """Tests for eval specification generation."""
 
+import json
+
 from prompterator.core.eval_spec import (
     CATEGORY_CRITERIA,
     _MAX_CRITERIA_PER_ISSUE,
     _deduplicate_details,
     _generate_eval_id,
+    _reconcile_evals_with_issues,
     generate_evals_from_issues,
 )
+from prompterator.models.eval import Eval, EvalRubric
 from prompterator.models.issue import Issue, IssueEvidence, IssueFile
 from prompterator.runners.llm import LLMClient
+
+from tests.conftest import MockLLMClient
 
 
 def test_generate_evals_from_issues(sample_issue_file):
@@ -164,7 +170,6 @@ def test_evidence_fallback_without_llm():
 def test_llm_returns_single_criterion_even_if_many_returned():
     """Only one criterion is kept even if LLM returns multiple."""
     from unittest.mock import MagicMock
-    import json
 
     mock_llm = MagicMock(spec=LLMClient)
     mock_llm.generate.return_value = json.dumps(
@@ -184,3 +189,145 @@ def test_llm_returns_single_criterion_even_if_many_returned():
     )
     eval_file = generate_evals_from_issues(issue_file, llm_client=mock_llm)
     assert len(eval_file.evals[0].rubric.criteria) == 1
+
+
+# ---------------------------------------------------------------------------
+# Issue reorganization / eval reconciliation
+# ---------------------------------------------------------------------------
+
+def _make_eval(eval_id, issue_ref, criteria):
+    return Eval(
+        id=eval_id,
+        type="rubric",
+        issue_ref=issue_ref,
+        description=f"Check {eval_id}",
+        rubric=EvalRubric(criteria=criteria),
+    )
+
+
+def test_reconcile_maps_by_meaning():
+    """LLM maps existing evals to new issues by semantic match."""
+    existing_evals = [
+        _make_eval("eval-old-01", "issue-old-01", ["Output does not add preamble"]),
+        _make_eval("eval-old-02", "issue-old-02", ["Output preserves checkbox format"]),
+    ]
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(id="issue-new-A", category="preamble", severity="high",
+                  summary="Output adds conversational preamble"),
+            Issue(id="issue-new-B", category="formatting", severity="medium",
+                  summary="Output changes checkbox format"),
+        ],
+    )
+
+    llm = MockLLMClient(responses=[json.dumps([
+        {"eval_id": "eval-old-01", "action": "keep", "new_issue_id": "issue-new-A"},
+        {"eval_id": "eval-old-02", "action": "keep", "new_issue_id": "issue-new-B"},
+    ])])
+
+    mapping = _reconcile_evals_with_issues(existing_evals, issue_file, llm)
+    assert mapping == {"eval-old-01": "issue-new-A", "eval-old-02": "issue-new-B"}
+
+
+def test_reconcile_drops_obsolete_evals():
+    """Evals for removed issues are dropped."""
+    existing_evals = [
+        _make_eval("eval-old-01", "issue-old-01", ["Output does not add preamble"]),
+        _make_eval("eval-old-02", "issue-old-02", ["Output preserves tone"]),
+    ]
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(id="issue-new-A", category="preamble", severity="high",
+                  summary="Preamble problem"),
+        ],
+    )
+
+    llm = MockLLMClient(responses=[json.dumps([
+        {"eval_id": "eval-old-01", "action": "keep", "new_issue_id": "issue-new-A"},
+        {"eval_id": "eval-old-02", "action": "drop"},
+    ])])
+
+    mapping = _reconcile_evals_with_issues(existing_evals, issue_file, llm)
+    assert "eval-old-01" in mapping
+    assert "eval-old-02" not in mapping
+
+
+def test_generate_evals_preserves_criteria_after_reorg():
+    """Hand-tuned criteria survive issue reorganization."""
+    existing_evals = [
+        _make_eval("eval-old-01", "issue-old-01", ["My hand-tuned criterion"]),
+    ]
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(id="issue-new-X", category="preamble", severity="high",
+                  summary="Preamble problem"),
+        ],
+    )
+
+    # First call: reconciliation, second call: would be criteria generation (shouldn't happen)
+    llm = MockLLMClient(responses=[
+        json.dumps([
+            {"eval_id": "eval-old-01", "action": "keep", "new_issue_id": "issue-new-X"},
+        ]),
+    ])
+
+    eval_file = generate_evals_from_issues(issue_file, llm, existing_evals=existing_evals)
+    assert len(eval_file.evals) == 1
+    ev = eval_file.evals[0]
+    assert ev.issue_ref == "issue-new-X"  # updated to new ID
+    assert ev.rubric.criteria == ["My hand-tuned criterion"]  # preserved
+
+
+def test_generate_evals_creates_new_for_unmatched_issues():
+    """New issues without matching evals get fresh criteria."""
+    existing_evals = [
+        _make_eval("eval-old-01", "issue-old-01", ["Old criterion"]),
+    ]
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(id="issue-new-X", category="preamble", severity="high",
+                  summary="Preamble problem"),
+            Issue(id="issue-new-Y", category="formatting", severity="medium",
+                  summary="Format problem",
+                  evidence=[IssueEvidence(source="r1.mb", feedback="format issue")]),
+        ],
+    )
+
+    llm = MockLLMClient(responses=[
+        # reconciliation: old eval maps to issue-new-X
+        json.dumps([
+            {"eval_id": "eval-old-01", "action": "keep", "new_issue_id": "issue-new-X"},
+        ]),
+        # criteria generation for issue-new-Y
+        '["Output preserves original formatting"]',
+    ])
+
+    eval_file = generate_evals_from_issues(issue_file, llm, existing_evals=existing_evals)
+    assert len(eval_file.evals) == 2
+    assert eval_file.evals[0].rubric.criteria == ["Old criterion"]  # preserved
+    assert eval_file.evals[1].rubric.criteria == ["Output preserves original formatting"]  # new
+
+
+def test_generate_evals_no_reorg_skips_reconciliation():
+    """When issue IDs match, no reconciliation LLM call is made."""
+    existing_evals = [
+        _make_eval("eval-01", "issue-01", ["Existing criterion"]),
+    ]
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(id="issue-01", category="preamble", severity="high",
+                  summary="Same issue"),
+        ],
+    )
+
+    llm = MockLLMClient()
+    eval_file = generate_evals_from_issues(issue_file, llm, existing_evals=existing_evals)
+
+    assert len(eval_file.evals) == 1
+    assert eval_file.evals[0].rubric.criteria == ["Existing criterion"]
+    assert len(llm.calls) == 0  # no LLM calls — direct ID match

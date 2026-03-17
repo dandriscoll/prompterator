@@ -1,5 +1,7 @@
 """Eval specification generation from issues."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
@@ -173,6 +175,93 @@ def _deduplicate_details(details: list[str]) -> list[str]:
     return [text for text, _words in kept]
 
 
+_RECONCILE_SYSTEM = (
+    "You are an eval maintenance assistant. The issues that evals were based on "
+    "have been reorganized — issues may have been split, merged, renamed, or "
+    "renumbered. You will see the NEW issues and the EXISTING eval criteria. "
+    "Your job is to map each existing eval's criteria to the new issue it best "
+    "matches, so that hand-tuned criteria are preserved.\n\n"
+    "For each existing eval, decide:\n"
+    "- KEEP: the eval's criteria still match a new issue (give the new issue ID)\n"
+    "- DROP: the eval tests for a problem that no longer exists in any issue\n\n"
+    "Output ONLY a JSON array of objects, one per existing eval:\n"
+    '  {"eval_id": "...", "action": "keep", "new_issue_id": "..."}\n'
+    '  {"eval_id": "...", "action": "drop"}\n\n'
+    "Rules:\n"
+    "- Each new issue should be matched by at most one existing eval.\n"
+    "- Match by meaning, not by ID — an eval about 'preamble' maps to whichever "
+    "new issue describes the preamble problem, regardless of its ID.\n"
+    "- If two existing evals match the same new issue, keep the one with more "
+    "specific criteria and drop the other.\n"
+    "- Do not wrap in markdown fences."
+)
+
+
+def _reconcile_evals_with_issues(
+    existing_evals: list[Eval],
+    issue_file: IssueFile,
+    llm_client: LLMClient,
+) -> dict[str, str]:
+    """Map existing evals to new issue IDs after issues were reorganized.
+
+    Returns:
+        Dict mapping existing eval_id → new issue_id for evals to keep.
+        Evals not in the dict should be dropped.
+    """
+    # Build the prompt showing new issues and existing evals
+    issue_lines = []
+    for issue in issue_file.issues:
+        issue_lines.append(f"- {issue.id} ({issue.category}): {issue.summary}")
+
+    eval_lines = []
+    for ev in existing_evals:
+        criteria_str = ""
+        if ev.rubric and ev.rubric.criteria:
+            criteria_str = "; ".join(ev.rubric.criteria)
+        desc = ev.description or ""
+        eval_lines.append(
+            f"- {ev.id} [issue_ref={ev.issue_ref}]: {desc}"
+            + (f"\n    Criteria: {criteria_str}" if criteria_str else "")
+        )
+
+    user_prompt = (
+        f"NEW ISSUES:\n{chr(10).join(issue_lines)}\n\n"
+        f"EXISTING EVALS:\n{chr(10).join(eval_lines)}\n\n"
+        "Map each existing eval to the new issue it best matches, or drop it."
+    )
+
+    raw = llm_client.generate(user_prompt, system=_RECONCILE_SYSTEM)
+
+    # Parse response
+    mapping: dict[str, str] = {}
+    try:
+        entries = json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start >= 0 and end > start:
+            try:
+                entries = json.loads(raw[start:end])
+            except json.JSONDecodeError:
+                return {}
+        else:
+            return {}
+
+    new_issue_ids = {issue.id for issue in issue_file.issues}
+    used_issues: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        eval_id = entry.get("eval_id", "")
+        action = entry.get("action", "").lower()
+        new_issue_id = entry.get("new_issue_id", "")
+        if action == "keep" and new_issue_id in new_issue_ids and new_issue_id not in used_issues:
+            mapping[eval_id] = new_issue_id
+            used_issues.add(new_issue_id)
+
+    return mapping
+
+
 def generate_evals_from_issues(
     issue_file: IssueFile,
     llm_client: LLMClient | None = None,
@@ -196,9 +285,23 @@ def generate_evals_from_issues(
     # Index existing evals by issue_ref
     existing_by_issue: dict[str, Eval] = {}
     if existing_evals:
-        for ev in existing_evals:
-            if ev.issue_ref:
-                existing_by_issue[ev.issue_ref] = ev
+        new_issue_ids = {issue.id for issue in issue_file.issues}
+
+        # Check if issue IDs have changed (reorganized)
+        orphaned = [ev for ev in existing_evals if ev.issue_ref and ev.issue_ref not in new_issue_ids]
+
+        if orphaned and llm_client is not None:
+            # Issues were reorganized — ask LLM to reconcile
+            mapping = _reconcile_evals_with_issues(existing_evals, issue_file, llm_client)
+            for ev in existing_evals:
+                new_id = mapping.get(ev.id)
+                if new_id:
+                    # Re-point the eval to its new issue and preserve criteria
+                    existing_by_issue[new_id] = ev
+        else:
+            for ev in existing_evals:
+                if ev.issue_ref:
+                    existing_by_issue[ev.issue_ref] = ev
 
     evals = []
     eval_index = 1
@@ -206,7 +309,11 @@ def generate_evals_from_issues(
     for issue in issue_file.issues:
         # Keep existing eval if it covers this issue
         if issue.id in existing_by_issue:
-            evals.append(existing_by_issue[issue.id])
+            kept = existing_by_issue[issue.id]
+            # Update the issue_ref to the new ID
+            kept_dict = kept.model_dump()
+            kept_dict["issue_ref"] = issue.id
+            evals.append(Eval(**kept_dict))
             eval_index += 1
             continue
         category = issue.category.lower()
