@@ -5,7 +5,8 @@ from pathlib import Path
 import click
 
 from prompterator.config.loader import get_config_base_dir, load_config
-from prompterator.core.calibrator import calibrate, revise_eval_criteria, save_calibration_report
+from prompterator.core.calibrator import calibrate, estimate_calibration_calls, revise_eval_criteria, save_calibration_report
+from prompterator.core.progress import Progress
 from prompterator.core.run import create_run_dir
 from prompterator.commands.resolve import ResolveError, resolve_prompt_and_evals, resolve_issues
 from prompterator.commands.feedback import find_mb_files, parse_mb_file
@@ -42,6 +43,12 @@ from prompterator.runners.llm import LLMClient, LLMError
     is_flag=True,
     help="Revise WEAK/BAD eval criteria using calibration mismatches",
 )
+@click.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    help="Suppress live progress output",
+)
 def calibrate_cmd(
     prompt: Path | None,
     evals_path: Path | None,
@@ -49,6 +56,7 @@ def calibrate_cmd(
     output: Path | None,
     verbose: bool,
     fix: bool,
+    quiet: bool,
 ) -> None:
     """Verify that evals agree with human-labeled feedback.
 
@@ -110,13 +118,13 @@ def calibrate_cmd(
     n_evals = len(eval_file.evals)
     n_feedback = len(feedback_list)
     n_entries = sum(len(fb.entries) for fb in feedback_list)
-    n_llm = n_evals * n_entries
+    n_llm = estimate_calibration_calls(eval_file, feedback_list, issue_file)
 
     click.echo()
     click.echo(f"Prompt:         {prompt_ref}")
     click.echo(f"Evals:          {n_evals} from {evals_path.name}")
     click.echo(f"Feedback:       {n_feedback} .mb files, {n_entries} records")
-    click.echo(f"LLM calls:      {n_llm} ({n_evals} evals x {n_entries} records)")
+    click.echo(f"LLM calls:      {n_llm} (FAIL-labeled entries only)")
     click.echo()
 
     # --- Initialize LLM ---------------------------------------------------
@@ -141,11 +149,15 @@ def calibrate_cmd(
         "the eval detects the problems humans identified..."
     )
     click.echo()
+    progress = Progress(n_llm, label="Calibrating", quiet=quiet)
     try:
-        cal_results = calibrate(eval_file, feedback_list, issue_file, llm, feedback_dir=feedback_dir)
+        cal_results = calibrate(eval_file, feedback_list, issue_file, llm,
+                                feedback_dir=feedback_dir, progress=progress)
     except LLMError as e:
         click.echo(f"LLM error during calibration: {e}", err=True)
         raise SystemExit(1)
+    finally:
+        progress.finish()
 
     if not cal_results:
         click.echo("No calibration results produced.")

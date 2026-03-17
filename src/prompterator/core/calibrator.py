@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from prompterator.core.progress import Progress
 from prompterator.models.calibration import (
     CalibrationExample,
     CalibrationReport,
@@ -224,6 +225,29 @@ def _resolve_input_content(
     return None
 
 
+def estimate_calibration_calls(
+    eval_file: EvalFile,
+    feedback_list: list[Feedback],
+    issue_file: IssueFile,
+) -> int:
+    """Estimate total LLM calls for calibration (FAIL-labeled entries only)."""
+    total = 0
+    for eval_spec in eval_file.evals:
+        labels = classify_labels(feedback_list, issue_file, eval_spec)
+        for fb in feedback_list:
+            mb_name = Path(fb.source_file).name
+            for entry in fb.entries:
+                if not entry.text.strip():
+                    continue
+                if entry.source_ref:
+                    label = labels.get(Path(entry.source_ref).name, labels.get(mb_name))
+                else:
+                    label = labels.get(mb_name)
+                if label is not None:
+                    total += 1
+    return total
+
+
 def calibrate(
     eval_file: EvalFile,
     feedback_list: list[Feedback],
@@ -231,6 +255,7 @@ def calibrate(
     llm_client: LLMClient,
     *,
     feedback_dir: Path | None = None,
+    progress: Progress | None = None,
 ) -> list[CalibrationResult]:
     """Run calibration for all evals against labeled feedback.
 
@@ -285,6 +310,8 @@ def calibrate(
                     eval_spec, entry.text, llm_client,
                     input_content=input_content,
                 )
+                if progress:
+                    progress.tick(eval_spec.id)
                 eval_result = "PASS" if eval_passed else "FAIL"
 
                 examples.append(
