@@ -39,9 +39,9 @@ from prompterator.runners.llm import LLMClient, LLMError
     help="Show per-example details",
 )
 @click.option(
-    "--no-fix",
+    "--auto-fix",
     is_flag=True,
-    help="Report only — do not revise WEAK/BAD eval criteria",
+    help="Automatically revise WEAK/BAD eval criteria using LLM (default: suggest command)",
 )
 @click.option(
     "--quiet",
@@ -55,7 +55,7 @@ def calibrate_cmd(
     feedback_dir: Path | None,
     output: Path | None,
     verbose: bool,
-    no_fix: bool,
+    auto_fix: bool,
     quiet: bool,
 ) -> None:
     """Verify that evals agree with human-labeled feedback.
@@ -67,8 +67,9 @@ def calibrate_cmd(
     whether the eval verdicts match the human labels. This validates
     that evals are reliable before using them to drive the tuning loop.
 
-    By default, automatically revises criteria for WEAK or BAD evals
-    using the mismatched examples. Use --no-fix to report only.
+    When WEAK or BAD evals are found, prints a suggested
+    ``prompterator evals -d`` command. Use --auto-fix to have the LLM
+    revise criteria automatically instead.
     """
     config = load_config()
     base_dir = get_config_base_dir()
@@ -222,14 +223,12 @@ def calibrate_cmd(
     save_calibration_report(report, output)
     click.echo(f"Calibration report saved to: {output}")
 
-    # --- Fix mode: revise bad evals ---------------------------------------
-    fix = not no_fix
-    if fix and needs_fix:
+    # --- Fix mode ---------------------------------------------------------
+    if needs_fix and auto_fix:
         click.echo()
         click.echo(
-            f"Revising {len(needs_fix)} eval(s) with WEAK/BAD calibration.\n"
-            f"Using mismatched examples to adjust criteria so evals\n"
-            f"better match human judgement..."
+            f"Revising {len(needs_fix)} eval(s) with WEAK/BAD detection.\n"
+            f"Using missed examples to broaden criteria..."
         )
 
         # Use editor LLM for criteria revision
@@ -250,12 +249,12 @@ def calibrate_cmd(
 
             click.echo()
             click.echo(f"  {cal.eval_id}:")
-            click.echo(f"    Problem: {cal.false_positives} false positive(s), {cal.false_negatives} false negative(s)")
+            click.echo(f"    Missed: {cal.false_negatives}")
             click.echo(f"    Current criteria:")
             for c in eval_spec.rubric.criteria:
                 click.echo(f"      - {c}")
 
-            click.echo(f"    Asking LLM to revise criteria based on mismatches...")
+            click.echo(f"    Asking LLM to revise criteria...")
 
             revised = revise_eval_criteria(
                 eval_spec, cal, feedback_list, editor_llm,
@@ -279,12 +278,49 @@ def calibrate_cmd(
         else:
             click.echo("No revisions were produced. Consider editing evals manually.")
 
-    elif any_bad and not fix:
+    elif needs_fix:
+        # Default: suggest a prompterator evals -d command for each bad eval
+        click.echo()
+        eval_by_id = {ev.id: ev for ev in eval_file.evals}
+        for cal in needs_fix:
+            eval_spec = eval_by_id.get(cal.eval_id)
+            if not eval_spec:
+                continue
+
+            # Build a directive from the missed examples
+            missed = [ex for ex in cal.examples if not ex.match]
+            missed_texts = []
+            for ex in missed:
+                # Find the feedback text for this example
+                for fb in feedback_list:
+                    mb_name = Path(fb.source_file).name
+                    for entry in fb.entries:
+                        src = Path(entry.source_ref).name if entry.source_ref else mb_name
+                        if src == ex.source and entry.text.strip():
+                            missed_texts.append(entry.text)
+
+            directive_parts = []
+            if eval_spec.rubric and eval_spec.rubric.criteria:
+                directive_parts.append(
+                    f"The eval {cal.eval_id} missed {cal.false_negatives} known problem(s). "
+                    f"Current criterion: {eval_spec.rubric.criteria[0]}"
+                )
+            if missed_texts:
+                directive_parts.append(
+                    "Missed feedback: " + "; ".join(missed_texts[:3])
+                )
+            directive_parts.append(
+                "Broaden the criterion to catch these cases"
+            )
+            directive = ". ".join(directive_parts)
+
+            click.echo(f"  {click.style(cal.eval_id, fg='cyan')}: {cal.verdict}")
+            click.echo(f"    To fix, re-generate evals with a directive:")
+            click.echo()
+            click.echo(f"    prompterator evals -d \"{directive}\"")
+            click.echo()
+
         click.echo(
-            "One or more evals have WEAK/BAD detection — their criteria\n"
-            "miss problems that humans identified.\n"
-            "\n"
-            "Run without --no-fix (the default) to automatically revise\n"
-            "criteria so they catch more real problems."
+            "Or use --auto-fix to have the LLM revise criteria directly."
         )
         raise SystemExit(1)
