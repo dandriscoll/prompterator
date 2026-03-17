@@ -347,8 +347,7 @@ def tune_cmd(
         click.echo()
         click.echo(
             "Tip: use 'prompterator improve -d \"...\"' to give the editor LLM\n"
-            "a specific instruction, then re-run tune. For example:\n"
-            "  prompterator improve -d \"Add a rule that the output must not include conversational preamble\""
+            "a specific instruction, then re-run tune."
         )
 
     click.echo(f"\nPrompt updated: {prompt}")
