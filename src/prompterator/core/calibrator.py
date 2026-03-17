@@ -20,15 +20,12 @@ def classify_labels(
     feedback_list: list[Feedback],
     issue_file: IssueFile,
     eval_spec: Eval,
-) -> dict[str, str]:
-    """Identify feedback sources that are known FAIL for an eval.
+) -> set[tuple[str, str]]:
+    """Identify specific feedback entries that are evidence for an eval's issue.
 
-    Only sources that appear in the linked issue's evidence are labeled.
-    Sources without explicit evidence are omitted — absence of feedback
-    does not imply PASS (the reviewer may not have assessed that category).
-
-    Labels are keyed by both the .mb file basename and any source_ref
-    basenames from individual records, so lookups work at either level.
+    Matches at the entry level: an entry is labeled FAIL only if its text
+    appears in the linked issue's evidence. Other entries from the same
+    .mb file but about different categories are not included.
 
     Args:
         feedback_list: All parsed feedback objects for the prompt.
@@ -36,31 +33,20 @@ def classify_labels(
         issue_file: The issue file containing evidence mappings.
 
     Returns:
-        Dict mapping source basename to "FAIL" for known-bad sources.
-        Sources not in the dict were not assessed and should be skipped.
+        Set of (source_basename, feedback_text) tuples that are known FAIL.
+        Entries not in the set were not assessed and should be skipped.
     """
-    # Find the issue linked to this eval
-    negative_sources: set[str] = set()
+    # Collect evidence texts keyed by source basename
+    evidence_entries: set[tuple[str, str]] = set()
 
     if eval_spec.issue_ref:
         for issue in issue_file.issues:
             if issue.id == eval_spec.issue_ref:
                 for ev in issue.evidence:
-                    negative_sources.add(Path(ev.source).name)
+                    evidence_entries.add((Path(ev.source).name, ev.feedback))
                 break
 
-    labels: dict[str, str] = {}
-    for fb in feedback_list:
-        mb_name = Path(fb.source_file).name
-        if mb_name in negative_sources:
-            labels[mb_name] = "FAIL"
-        for entry in fb.entries:
-            if entry.source_ref:
-                src_name = Path(entry.source_ref).name
-                if src_name in negative_sources:
-                    labels[src_name] = "FAIL"
-
-    return labels
+    return evidence_entries
 
 
 def _build_output_rubric_prompt(
@@ -230,20 +216,19 @@ def estimate_calibration_calls(
     feedback_list: list[Feedback],
     issue_file: IssueFile,
 ) -> int:
-    """Estimate total LLM calls for calibration (FAIL-labeled entries only)."""
+    """Estimate total LLM calls for calibration (evidence-matched entries only)."""
     total = 0
     for eval_spec in eval_file.evals:
-        labels = classify_labels(feedback_list, issue_file, eval_spec)
+        evidence_entries = classify_labels(feedback_list, issue_file, eval_spec)
+        if not evidence_entries:
+            continue
         for fb in feedback_list:
             mb_name = Path(fb.source_file).name
             for entry in fb.entries:
                 if not entry.text.strip():
                     continue
-                if entry.source_ref:
-                    label = labels.get(Path(entry.source_ref).name, labels.get(mb_name))
-                else:
-                    label = labels.get(mb_name)
-                if label is not None:
+                src_name = Path(entry.source_ref).name if entry.source_ref else mb_name
+                if (mb_name, entry.text) in evidence_entries or (src_name, entry.text) in evidence_entries:
                     total += 1
     return total
 
@@ -277,7 +262,10 @@ def calibrate(
     results: list[CalibrationResult] = []
 
     for eval_spec in eval_file.evals:
-        labels = classify_labels(feedback_list, issue_file, eval_spec)
+        evidence_entries = classify_labels(feedback_list, issue_file, eval_spec)
+
+        if not evidence_entries:
+            continue
 
         examples: list[CalibrationExample] = []
         for fb in feedback_list:
@@ -288,18 +276,13 @@ def calibrate(
                 if not entry.text.strip():
                     continue
 
-                # Determine label: prefer entry's source_ref, fall back to .mb file name
-                if entry.source_ref:
-                    src_name = Path(entry.source_ref).name
-                    label = labels.get(src_name, labels.get(mb_name))
-                else:
-                    src_name = mb_name
-                    label = labels.get(mb_name)
-
-                # Skip entries without a known label — absence of feedback
-                # doesn't mean PASS (reviewer may not have assessed this category)
-                if label is None:
+                # Only include entries whose text matches evidence for this eval's issue.
+                # An .mb file may have entries about many categories — we only want the
+                # specific entry that was cited as evidence, not all entries from that file.
+                src_name = Path(entry.source_ref).name if entry.source_ref else mb_name
+                if (mb_name, entry.text) not in evidence_entries and (src_name, entry.text) not in evidence_entries:
                     continue
+                label = "FAIL"
 
                 # Resolve input content from prior_ref
                 input_content = _resolve_input_content(

@@ -39,9 +39,9 @@ from prompterator.runners.llm import LLMClient, LLMError
     help="Show per-example details",
 )
 @click.option(
-    "--fix",
+    "--no-fix",
     is_flag=True,
-    help="Revise WEAK/BAD eval criteria using calibration mismatches",
+    help="Report only — do not revise WEAK/BAD eval criteria",
 )
 @click.option(
     "--quiet",
@@ -55,7 +55,7 @@ def calibrate_cmd(
     feedback_dir: Path | None,
     output: Path | None,
     verbose: bool,
-    fix: bool,
+    no_fix: bool,
     quiet: bool,
 ) -> None:
     """Verify that evals agree with human-labeled feedback.
@@ -67,8 +67,8 @@ def calibrate_cmd(
     whether the eval verdicts match the human labels. This validates
     that evals are reliable before using them to drive the tuning loop.
 
-    With --fix, automatically revises criteria for WEAK or BAD evals
-    using the mismatched examples, then rewrites the eval file.
+    By default, automatically revises criteria for WEAK or BAD evals
+    using the mismatched examples. Use --no-fix to report only.
     """
     config = load_config()
     base_dir = get_config_base_dir()
@@ -223,6 +223,7 @@ def calibrate_cmd(
     click.echo(f"Calibration report saved to: {output}")
 
     # --- Fix mode: revise bad evals ---------------------------------------
+    fix = not no_fix
     if fix and needs_fix:
         click.echo()
         click.echo(
@@ -283,10 +284,7 @@ def calibrate_cmd(
             "One or more evals have WEAK/BAD detection — their criteria\n"
             "miss problems that humans identified.\n"
             "\n"
-            "To fix automatically:\n"
-            "  prompterator calibrate --fix\n"
-            "\n"
-            "This will use the missed examples to broaden the eval\n"
+            "Run without --no-fix (the default) to automatically revise\n"
             "criteria so they catch more real problems."
         )
         raise SystemExit(1)

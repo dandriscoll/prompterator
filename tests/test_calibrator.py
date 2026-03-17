@@ -44,11 +44,11 @@ def _make_issue_file(negative_sources: list[str]) -> IssueFile:
         issues=[
             Issue(
                 id="issue-test-01",
-                category="pose-misalignment",
+                category="chatty-preamble",
                 severity="high",
-                summary="did not follow pose",
+                summary="adds conversational preamble",
                 evidence=[
-                    IssueEvidence(source=src, feedback="did not follow pose")
+                    IssueEvidence(source=src, feedback="adds conversational preamble")
                     for src in negative_sources
                 ],
             ),
@@ -62,7 +62,7 @@ def _make_eval(eval_id: str = "eval-test-01", issue_ref: str = "issue-test-01") 
         type="rubric",
         issue_ref=issue_ref,
         rubric=EvalRubric(
-            criteria=["Prompt addresses: did not follow pose"],
+            criteria=["Output does not begin with a conversational preamble"],
             scoring="all_required",
         ),
     )
@@ -72,24 +72,26 @@ def _make_eval(eval_id: str = "eval-test-01", issue_ref: str = "issue-test-01") 
 # classify_labels
 # ---------------------------------------------------------------------------
 
-def test_classify_labels_only_evidence_sources():
-    """Only files in issue evidence get labels; others are omitted."""
+def test_classify_labels_only_evidence_entries():
+    """Only specific entries cited as evidence are labeled; others omitted."""
     feedback_list = [
         _make_feedback("001-r1.mb", "adds conversational preamble"),
-        _make_feedback("001-r2.mb", "replaced checkboxes with sections"),
+        _make_feedback("001-r2.mb", "grammar issues"),  # different category
         _make_feedback("002-r1.mb", "output looks good"),
     ]
-    issue_file = _make_issue_file(["001-r1.mb", "001-r2.mb"])
+    # Issue evidence cites 001-r1.mb with specific text
+    issue_file = _make_issue_file(["001-r1.mb"])
     eval_spec = _make_eval()
 
-    labels = classify_labels(feedback_list, issue_file, eval_spec)
-    assert labels["001-r1.mb"] == "FAIL"
-    assert labels["001-r2.mb"] == "FAIL"
-    assert "002-r1.mb" not in labels  # not assessed, not labeled
+    evidence = classify_labels(feedback_list, issue_file, eval_spec)
+    assert ("001-r1.mb", "adds conversational preamble") in evidence
+    # 001-r2.mb has different text, not in evidence
+    assert ("001-r2.mb", "grammar issues") not in evidence
+    assert ("002-r1.mb", "output looks good") not in evidence
 
 
 def test_classify_labels_no_issue_ref():
-    """When eval has no issue_ref, no feedback is labelled."""
+    """When eval has no issue_ref, no entries are labeled."""
     feedback_list = [
         _make_feedback("file1.mb", "some feedback"),
         _make_feedback("file2.mb", "other feedback"),
@@ -102,20 +104,20 @@ def test_classify_labels_no_issue_ref():
         rubric=EvalRubric(criteria=["Something"], scoring="all_required"),
     )
 
-    labels = classify_labels(feedback_list, issue_file, eval_spec)
-    assert len(labels) == 0  # no labels without issue_ref
+    evidence = classify_labels(feedback_list, issue_file, eval_spec)
+    assert len(evidence) == 0
 
 
 def test_classify_labels_full_path_normalisation():
     """Source files with full paths still match basename in evidence."""
     feedback_list = [
-        _make_feedback("/data/feedback/001-r1.mb", "adds preamble"),
+        _make_feedback("/data/feedback/001-r1.mb", "adds conversational preamble"),
     ]
     issue_file = _make_issue_file(["001-r1.mb"])
     eval_spec = _make_eval()
 
-    labels = classify_labels(feedback_list, issue_file, eval_spec)
-    assert labels["001-r1.mb"] == "FAIL"
+    evidence = classify_labels(feedback_list, issue_file, eval_spec)
+    assert ("001-r1.mb", "adds conversational preamble") in evidence
 
 
 # ---------------------------------------------------------------------------
@@ -195,26 +197,26 @@ def test_verdict_bad():
 def test_run_calibration_eval_pass():
     """LLM returning PASS should yield True."""
     llm = MockLLMClient(responses=[
-        "CRITERION: Prompt addresses: did not follow pose\n"
+        "CRITERION: Output does not begin with a conversational preamble\n"
         "RESULT: PASS\n"
-        "REASON: Feedback says pose is correct\n"
+        "REASON: No preamble found\n"
         "OVERALL: PASS\nSCORE: 1.0"
     ])
     eval_spec = _make_eval()
-    result = run_calibration_eval(eval_spec, "correct pose", llm)
+    result = run_calibration_eval(eval_spec, "output starts directly with the list", llm)
     assert result is True
 
 
 def test_run_calibration_eval_fail():
     """LLM returning FAIL should yield False."""
     llm = MockLLMClient(responses=[
-        "CRITERION: Prompt addresses: did not follow pose\n"
+        "CRITERION: Output does not begin with a conversational preamble\n"
         "RESULT: FAIL\n"
-        "REASON: Feedback says pose was wrong\n"
+        "REASON: Output starts with chatty intro\n"
         "OVERALL: FAIL\nSCORE: 0.0"
     ])
     eval_spec = _make_eval()
-    result = run_calibration_eval(eval_spec, "did not follow pose", llm)
+    result = run_calibration_eval(eval_spec, "adds conversational preamble", llm)
     assert result is False
 
 
@@ -233,9 +235,9 @@ def test_run_calibration_eval_non_rubric():
 def test_calibrate_perfect_detection():
     """All known-bad feedback correctly detected."""
     feedback_list = [
-        _make_feedback("neg1.mb", "did not follow pose"),
-        _make_feedback("neg2.mb", "did not follow pose"),
-        _make_feedback("pos1.mb", "correct pose"),  # not in evidence, skipped
+        _make_feedback("neg1.mb", "adds conversational preamble"),
+        _make_feedback("neg2.mb", "adds conversational preamble"),
+        _make_feedback("pos1.mb", "output starts directly with the list"),  # not in evidence, skipped
     ]
     issue_file = _make_issue_file(["neg1.mb", "neg2.mb"])
     eval_file = EvalFile(
@@ -262,10 +264,10 @@ def test_calibrate_perfect_detection():
 def test_calibrate_with_false_negative():
     """One negative example gets PASS from eval (missed detection)."""
     feedback_list = [
-        _make_feedback("neg1.mb", "did not follow pose"),
-        _make_feedback("neg2.mb", "did not follow pose"),
-        _make_feedback("pos1.mb", "correct pose"),  # skipped
-        _make_feedback("pos2.mb", "correct pose"),  # skipped
+        _make_feedback("neg1.mb", "adds conversational preamble"),
+        _make_feedback("neg2.mb", "adds conversational preamble"),
+        _make_feedback("pos1.mb", "output starts directly with the list"),  # skipped
+        _make_feedback("pos2.mb", "output starts directly with the list"),  # skipped
     ]
     issue_file = _make_issue_file(["neg1.mb", "neg2.mb"])
     eval_file = EvalFile(
@@ -291,8 +293,8 @@ def test_calibrate_with_false_negative():
 def test_calibrate_all_missed():
     """All known-bad examples missed gives BAD verdict."""
     feedback_list = [
-        _make_feedback("neg1.mb", "bad"),
-        _make_feedback("neg2.mb", "bad"),
+        _make_feedback("neg1.mb", "adds conversational preamble"),
+        _make_feedback("neg2.mb", "adds conversational preamble"),
         _make_feedback("pos1.mb", "good"),  # skipped
     ]
     issue_file = _make_issue_file(["neg1.mb", "neg2.mb"])
@@ -317,7 +319,7 @@ def test_calibrate_all_missed():
 def test_calibrate_skips_unassessed_feedback():
     """Feedback not in issue evidence is skipped, not labeled PASS."""
     feedback_list = [
-        _make_feedback("neg1.mb", "did not follow pose"),
+        _make_feedback("neg1.mb", "adds conversational preamble"),
         _make_feedback("unrelated.mb", "different problem entirely"),
     ]
     issue_file = _make_issue_file(["neg1.mb"])
@@ -406,6 +408,36 @@ def test_calibrate_multiple_evals():
     assert results[1].accuracy == 1.0
     assert results[1].num_examples == 1
     assert len(llm.calls) == 2  # one call per evidence source
+
+
+def test_calibrate_only_matching_entries_from_multi_entry_file():
+    """Only entries whose text matches evidence are calibrated, not all entries from the file."""
+    # One .mb file with 3 entries, but only 1 is cited as evidence
+    feedback_list = [
+        Feedback(
+            source_file="review.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[
+                FeedbackEntry(text="adds conversational preamble"),       # in evidence
+                FeedbackEntry(text="grammar was incorrect"),      # NOT in evidence
+                FeedbackEntry(text="formatting looks off"),       # NOT in evidence
+            ],
+        ),
+    ]
+    issue_file = _make_issue_file(["review.mb"])  # evidence text: "adds conversational preamble"
+    eval_file = EvalFile(
+        prompt_ref="test.prompt.txt",
+        evals=[_make_eval()],
+    )
+
+    llm = MockLLMClient(responses=[
+        "CRITERION: X\nRESULT: FAIL\nREASON: Bad\nOVERALL: FAIL\nSCORE: 0.0",
+    ])
+
+    results = calibrate(eval_file, feedback_list, issue_file, llm)
+    cal = results[0]
+    assert cal.num_examples == 1  # only the matching entry, not all 3
+    assert len(llm.calls) == 1
 
 
 # ---------------------------------------------------------------------------
