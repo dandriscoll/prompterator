@@ -86,6 +86,7 @@ def _build_edit_prompt(
     edit_history: list[dict] | None = None,
     stall_count: int = 0,
     eval_file: EvalFile | None = None,
+    focus_eval: str | None = None,
 ) -> str:
     """Build the prompt for the edit LLM call."""
     issues_text = []
@@ -115,7 +116,8 @@ ISSUES:
         if failing:
             fail_text = []
             for r in failing:
-                line = f"- FAIL {r.eval_id} ({r.score:.1f}/10)"
+                tag = ">>> FOCUS" if focus_eval and r.eval_id == focus_eval else "FAIL"
+                line = f"- {tag} {r.eval_id} ({r.score:.1f}/10)"
                 if r.details:
                     line += f" — {r.details}"
                 # Include eval criteria so the improver knows what to fix
@@ -124,11 +126,25 @@ ISSUES:
                     for c in spec.rubric.criteria:
                         line += f"\n    Criterion: {c}"
                 fail_text.append(line)
-            prompt += f"\n\nFAILING EVALS (pick one to fix):\n{chr(10).join(fail_text)}"
+            if focus_eval:
+                header = f"FAILING EVALS (fix the FOCUS eval — {focus_eval}):"
+            else:
+                header = "FAILING EVALS (pick one to fix):"
+            prompt += f"\n\n{header}\n{chr(10).join(fail_text)}"
         if passing:
-            pass_text = [f"- PASS {r.eval_id} ({r.score:.1f}/10)" for r in passing]
+            pass_text = []
+            for r in passing:
+                if focus_eval and r.eval_id == focus_eval:
+                    line = f"- >>> FOCUS {r.eval_id} ({r.score:.1f}/10) — strengthen this eval"
+                    spec = eval_specs.get(r.eval_id)
+                    if spec and spec.rubric and spec.rubric.criteria:
+                        for c in spec.rubric.criteria:
+                            line += f"\n    Criterion: {c}"
+                    pass_text.append(line)
+                else:
+                    pass_text.append(f"- PASS {r.eval_id} ({r.score:.1f}/10)")
             prompt += f"\n\nPASSING EVALS (do not regress):\n{chr(10).join(pass_text)}"
-        if not failing:
+        if not failing and not focus_eval:
             prompt += "\n\nAll evals are passing. Focus on strengthening the weakest eval."
 
     if edit_history:
@@ -757,6 +773,7 @@ def generate_improved_prompt_with_rationale(
     edit_history: list[dict] | None = None,
     stall_count: int = 0,
     eval_file: EvalFile | None = None,
+    focus_eval: str | None = None,
 ) -> tuple[str, str, str, str]:
     """Generate an improved prompt via structured edit.
 
@@ -768,6 +785,7 @@ def generate_improved_prompt_with_rationale(
         edit_history=edit_history,
         stall_count=stall_count,
         eval_file=eval_file,
+        focus_eval=focus_eval,
     )
 
     # Step 1: Ideation — creative, higher temperature

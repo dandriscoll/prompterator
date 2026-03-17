@@ -136,6 +136,7 @@ def run_tuning_loop(
     counterpart_directions: list[str] | None = None,
     dialog_turns: int = 3,
     quiet: bool = False,
+    focus_eval: str | None = None,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -230,6 +231,7 @@ def run_tuning_loop(
                 edit_history=edit_history,
                 stall_count=stall_count,
                 eval_file=eval_file,
+                focus_eval=focus_eval,
             )
             if improved_text != current_text:
                 break
@@ -323,21 +325,26 @@ def run_tuning_loop(
             for j, out_text in enumerate(new_rf.generated_outputs):
                 (run_dir / f"{base_name}.{i:03d}.output.{j + 1:03d}.txt").write_text(out_text)
 
-        # Accept or reject per-eval: accept if any eval improved and
-        # no eval regressed beyond noise. This prevents the overall score
-        # from masking per-eval progress or regressions.
+        # Accept or reject per-eval: accept if the target eval improved
+        # and no other eval regressed beyond noise.
         noise_margin = 5.0 / max(len(new_results), 1)
         best_scores = {r.eval_id: r.score for r in best_results}
+        focus_improved = False
         any_improved = False
         any_regressed = False
         for r in new_results:
             prev = best_scores.get(r.eval_id, 0.0)
             if r.score > prev + noise_margin:
                 any_improved = True
+                if focus_eval and r.eval_id == focus_eval:
+                    focus_improved = True
             if r.score < prev - noise_margin:
                 any_regressed = True
 
-        accepted = any_improved and not any_regressed
+        if focus_eval:
+            accepted = focus_improved and not any_regressed
+        else:
+            accepted = any_improved and not any_regressed
         edit_history.append({
             "rationale": rationale,
             "action": edit_action,

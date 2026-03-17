@@ -97,6 +97,13 @@ from prompterator.runners.llm import LLMClient, LLMError
     help="Number of author turns in multi-turn dialog",
 )
 @click.option(
+    "--focus",
+    "-f",
+    type=str,
+    default=None,
+    help="Focus on improving a specific eval ID (others must not regress)",
+)
+@click.option(
     "--quiet",
     "-q",
     is_flag=True,
@@ -116,6 +123,7 @@ def tune_cmd(
     all_evals: bool,
     counterpart: Path | None,
     dialog_turns: int,
+    focus: str | None,
     quiet: bool,
 ) -> None:
     """Run the full tuning loop: improve → test → improve iteratively.
@@ -144,6 +152,13 @@ def tune_cmd(
     if not eval_file.evals:
         click.echo("No evaluations to run.")
         raise SystemExit(1)
+
+    if focus:
+        eval_ids = {ev.id for ev in eval_file.evals}
+        if focus not in eval_ids:
+            click.echo(f"Focus eval '{focus}' not found. Available: {', '.join(sorted(eval_ids))}")
+            raise SystemExit(1)
+        click.echo(f"Focus: {focus} (others must not regress)")
 
     if runs is not None and max_runs is not None:
         click.echo("Error: --runs/-r and --max-runs/-m are mutually exclusive.", err=True)
@@ -305,6 +320,7 @@ def tune_cmd(
             counterpart_directions=counterpart_directions or None,
             dialog_turns=dialog_turns,
             quiet=quiet,
+            focus_eval=focus,
         )
     except LLMError as e:
         _clear_status()
