@@ -404,6 +404,7 @@ def run_tuning_loop(
             best_text, issue_file, editor_llm,
             eval_results=best_results,
             edit_history=edit_history,
+            focus_eval=focus_eval,
         )
 
     report = TuneReport(

@@ -697,6 +697,7 @@ def generate_help_request(
     llm_client: LLMClient,
     eval_results: list[EvalResult] | None = None,
     edit_history: list[dict] | None = None,
+    focus_eval: str | None = None,
 ) -> str:
     """Generate a help request when tuning plateaus.
 
@@ -708,15 +709,23 @@ def generate_help_request(
     parts = [f"CURRENT PROMPT:\n{numbered}"]
 
     if eval_results:
-        failing = [r for r in eval_results if not r.passed]
-        if failing:
-            fail_lines = []
-            for r in failing:
-                line = f"- FAIL {r.eval_id} (score={r.score:.2f})"
-                if r.details:
-                    line += f" — {r.details}"
-                fail_lines.append(line)
-            parts.append(f"STILL FAILING:\n{chr(10).join(fail_lines)}")
+        if focus_eval:
+            focus_result = next((r for r in eval_results if r.eval_id == focus_eval), None)
+            if focus_result:
+                line = f"- {focus_eval} (score={focus_result.score:.2f})"
+                if focus_result.details:
+                    line += f" — {focus_result.details}"
+                parts.append(f"STUCK ON (focus eval):\n{line}")
+        else:
+            failing = [r for r in eval_results if not r.passed]
+            if failing:
+                fail_lines = []
+                for r in failing:
+                    line = f"- FAIL {r.eval_id} (score={r.score:.2f})"
+                    if r.details:
+                        line += f" — {r.details}"
+                    fail_lines.append(line)
+                parts.append(f"STILL FAILING:\n{chr(10).join(fail_lines)}")
 
     if edit_history:
         history_lines = []
@@ -728,10 +737,17 @@ def generate_help_request(
 
     user_prompt = "\n\n".join(parts)
 
+    system = _HELP_SYSTEM
+    if focus_eval:
+        system += (
+            f"\n\nIMPORTANT: The tuning was focused on eval {focus_eval}. "
+            f"Only discuss that eval — do not mention other evals."
+        )
+
     try:
         return llm_client.generate(
             user_prompt,
-            system=_HELP_SYSTEM,
+            system=system,
             temperature=0.3,
         )
     except Exception:
