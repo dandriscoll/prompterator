@@ -161,18 +161,24 @@ def improve_cmd(
         click.echo(f"Editor LLM error: {e}", err=True)
         raise SystemExit(1)
 
+    # Load eval file if available (needed for multi-run and helpful for single-run)
+    from prompterator.core.eval_spec import load_eval_file
+    evals_dir = config.get_dir("evals", base_dir)
+    evals_path = evals_dir / f"{base_name}.eval.yaml"
+    eval_file = None
+    if evals_path.exists():
+        try:
+            eval_file = load_eval_file(evals_path)
+        except Exception:
+            pass
+
     # Multi-run mode: delegate to tuning loop
     if runs > 1:
-        from prompterator.core.eval_spec import load_eval_file
         from prompterator.core.tuner import run_tuning_loop
 
-        # Resolve eval file
-        evals_dir = config.get_dir("evals", base_dir)
-        evals_path = evals_dir / f"{base_name}.eval.yaml"
-        if not evals_path.exists():
+        if eval_file is None:
             click.echo(f"No eval file found at {evals_path} (needed for multi-run mode)")
             raise SystemExit(1)
-        eval_file = load_eval_file(evals_path)
 
         try:
             author_llm = LLMClient(**config.resolve_role("author"))
