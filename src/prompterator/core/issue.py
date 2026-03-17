@@ -167,12 +167,16 @@ def consolidate_feedback(
                 source, text = observations[idx]
                 evidence.append(IssueEvidence(source=source, feedback=text))
 
-        # Apply min_occurrences threshold
-        if len(evidence) < min_occurrences:
+        # Apply min_occurrences threshold based on unique sources, not
+        # raw evidence count. Multiple entries from the same .mb file
+        # count as 1 occurrence. Skip filtering entirely when there's
+        # only 1 source (first review — every cluster is a new discovery).
+        unique_sources = len({ev.source for ev in evidence})
+        if total_sources > 1 and unique_sources < min_occurrences:
             continue
 
-        # Compute severity from evidence count ratio
-        severity = _determine_severity(len(evidence), total_sources)
+        # Compute severity from unique source count ratio
+        severity = _determine_severity(unique_sources, total_sources)
 
         issue = Issue(
             id=_generate_issue_id(prompt_ref, issue_index),

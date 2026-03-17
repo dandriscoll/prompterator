@@ -7,7 +7,7 @@ import click
 
 from prompterator.commands.feedback import find_mb_files, parse_mb_file
 from prompterator.config.loader import get_config_base_dir, load_config
-from prompterator.core.issue import consolidate_feedback, load_issue_file, save_issue_file
+from prompterator.core.issue import _split_feedback_entry, consolidate_feedback, load_issue_file, save_issue_file
 from prompterator.runners.llm import LLMClient
 
 
@@ -108,7 +108,15 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool, direc
         )
 
         if not issue_file.issues:
-            click.echo(f"  {prompt_ref}: no issues (below threshold)")
+            n_obs = sum(
+                len(_split_feedback_entry(e.text))
+                for fb in feedback_list for e in fb.entries
+            )
+            click.echo(
+                f"  {prompt_ref}: no issues generated from {len(feedback_list)} file(s), "
+                f"{n_obs} observation(s) — check min_occurrences ({config.feedback.min_occurrences}) "
+                f"or re-run with --dry-run to see LLM output"
+            )
             continue
 
         if dry_run:

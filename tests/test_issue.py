@@ -88,7 +88,38 @@ def test_consolidate_clusters():
 
 
 def test_min_occurrences_filter():
-    """Clusters with too few entries are filtered by min_occurrences."""
+    """Clusters with too few unique sources are filtered by min_occurrences."""
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="preamble at the top")],
+        ),
+        Feedback(
+            source_file="r2.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="output looks fine")],
+        ),
+    ]
+
+    # Cluster with evidence from only r1 (1 unique source), min_occurrences=2
+    llm_response = json.dumps([
+        {
+            "label": "preamble-insertion",
+            "summary": "Output starts with unwanted preamble",
+            "evidence_indices": [0],
+        }
+    ])
+    mock = MockLLMClient(responses=[llm_response])
+
+    result = consolidate_feedback(
+        feedback_list, "test.prompt.txt", mock, min_occurrences=2
+    )
+    assert len(result.issues) == 0
+
+
+def test_min_occurrences_skipped_with_single_source():
+    """With only 1 feedback source, min_occurrences doesn't filter."""
     feedback_list = [
         Feedback(
             source_file="r1.mb",
@@ -109,7 +140,8 @@ def test_min_occurrences_filter():
     result = consolidate_feedback(
         feedback_list, "test.prompt.txt", mock, min_occurrences=2
     )
-    assert len(result.issues) == 0
+    # Single source — threshold skipped, issue is kept
+    assert len(result.issues) == 1
 
 
 def test_severity_determination():
