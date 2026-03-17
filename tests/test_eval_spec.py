@@ -135,10 +135,11 @@ def test_llm_criteria_inversion():
     criteria = eval_file.evals[0].rubric.criteria
     assert len(criteria) == 1
     assert criteria[0] == "Output begins directly with the requested content"
-    # LLM receives only the issue summary, not evidence
-    mock_llm.generate.assert_called_once_with(
-        "Output starts with unwanted preamble", system=mock_llm.generate.call_args.kwargs["system"]
-    )
+    # LLM receives issue summary AND evidence
+    call_args = mock_llm.generate.call_args
+    assert "Output starts with unwanted preamble" in call_args.args[0]
+    assert "preamble before list" in call_args.args[0]
+    assert "chatbot sign-off at end" in call_args.args[0]
 
 
 def test_evidence_fallback_without_llm():

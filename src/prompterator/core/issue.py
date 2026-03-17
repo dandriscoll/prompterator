@@ -20,11 +20,13 @@ _CLUSTER_SYSTEM = (
     "describe a problem with the output. Output ONLY a JSON array of clusters. "
     "Each cluster has:\n"
     '  "label": a short kebab-case tag (e.g. "chatty-preamble", "structural-rewrite"),\n'
-    '  "summary": one sentence distilling the underlying problem into an actionable '
-    "description. Do NOT echo the user's words — diagnose the root cause and describe "
-    "what specifically needs to change (e.g. instead of 'The text is too chatty' write "
-    "'Output includes conversational filler phrases and unnecessary qualifiers that "
-    "dilute the substantive content'),\n"
+    '  "summary": a SPECIFIC description of the problem that references concrete '
+    "details from the observations — quote exact words, phrases, or patterns from "
+    "the feedback. Do NOT write generic summaries like 'output doesn't follow "
+    "instructions' or 'content is not preserved'. Instead cite what actually happened, "
+    "e.g. 'Output begins with a conversational sentence like \"Here\\'s your updated "
+    "list\" before the actual content' or 'Output replaces [ ] checkbox markers with "
+    "bullet-pointed priority sections',\n"
     '  "evidence_indices": list of 0-based indices into the input observations.\n'
     "Do not wrap the JSON in markdown fences."
 )

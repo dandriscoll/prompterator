@@ -14,18 +14,27 @@ _CRITERIA_SYSTEM = (
     "You convert an issue description into a single evaluation pass-criterion. "
     "The issue describes a PROBLEM. You produce ONE criterion that checks for "
     "the ABSENCE of that problem — it should PASS when the problem is gone.\n\n"
+    "You may also see EVIDENCE — actual feedback quotes describing what went "
+    "wrong. Use these to make your criterion SPECIFIC. Reference the concrete "
+    "words, patterns, or structures from the evidence, not generic categories.\n\n"
     "Frame the criterion as what the output must NOT contain or do. "
     "Do not frame it as what the output SHOULD contain — that overspecifies "
     "and tests for things beyond the original issue.\n\n"
     "Examples:\n"
-    '  Issue: "Output adds conversational preamble before the list"\n'
-    '  Criterion: "Output does not begin with a preamble or introduction"\n\n'
-    '  Issue: "Output replaces checkboxes with priority-grouped sections"\n'
-    '  Criterion: "Output does not reorganize items into new categories or sections"\n\n'
-    '  Issue: "Output removes profanity and emotional language"\n'
-    '  Criterion: "Output does not sanitize or censor the user\'s original language"\n\n'
+    "  Issue: Output adds conversational preamble before the list\n"
+    "  Evidence: starts with 'Here's your updated to-do list'\n"
+    "  Criterion: Output does not begin with a conversational sentence "
+    "like 'Here's your...' before the first list item\n\n"
+    "  Issue: Output replaces checkboxes with priority-grouped sections\n"
+    "  Evidence: replaced [ ] items with priority headings\n"
+    "  Criterion: Output does not replace [ ] checkbox items with "
+    "priority-grouped sections or headings\n\n"
+    "  Issue: Output removes profanity and emotional language\n"
+    "  Evidence: sanitized swear words, replaced 'damn' with 'darn'\n"
+    "  Criterion: Output does not sanitize, censor, or replace profanity "
+    "or emotional language from the original text\n\n"
     "Stay focused on the specific issue. Do not add criteria for problems "
-    "that were not raised.\n\n"
+    "that were not raised. Be specific — cite the patterns from evidence.\n\n"
     "Output ONLY a JSON array containing exactly one string. "
     "Do not wrap in markdown fences."
 )
@@ -79,11 +88,16 @@ def _criteria_from_issue(issue, llm_client: LLMClient | None = None, directive: 
     """
     if llm_client is not None:
         try:
-            user_input = issue.summary
+            # Build input with issue summary and concrete evidence
+            parts = [f"ISSUE: {issue.summary}"]
+            if issue.evidence:
+                evidence_texts = [ev.feedback for ev in issue.evidence[:5]]
+                parts.append("EVIDENCE:\n" + "\n".join(f"- {t}" for t in evidence_texts))
+            user_input = "\n\n".join(parts)
             if directive:
                 user_input = (
                     f"IMPORTANT — follow this guidance when writing the criterion:\n"
-                    f"{directive}\n\nISSUE: {user_input}"
+                    f"{directive}\n\n{user_input}"
                 )
             raw = llm_client.generate(user_input, system=_CRITERIA_SYSTEM)
             criteria = json.loads(raw)
