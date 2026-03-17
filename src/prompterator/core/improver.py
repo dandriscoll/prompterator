@@ -234,23 +234,42 @@ ISSUES:
         )
     elif plateau_depth >= 5 or (repeat_detected and n_history >= 6):
         # Tier 2: Strong redirection with suggestions
-        warnings.append(
-            "CRITICAL: Your recent ideas are too similar and the score is "
-            "not improving. You MUST try something fundamentally different:\n"
-            "- Target a DIFFERENT failing eval than your last attempt\n"
-            "- Address the root cause instead of the symptom\n"
-            "- Use REPLACE to rewrite an existing instruction rather than "
-            "adding new ones\n"
-            "- Consider whether the example in the prompt contradicts your rule\n"
-            "- Think about what the LLM is actually doing wrong and WHY"
-        )
+        if focus_eval:
+            warnings.append(
+                f"CRITICAL: Your recent ideas are too similar and {focus_eval} is "
+                f"not improving. You MUST try something fundamentally different:\n"
+                f"- Stay focused on {focus_eval} — do NOT switch to other evals\n"
+                "- Address the root cause instead of the symptom\n"
+                "- Use REPLACE to rewrite an existing instruction rather than "
+                "adding new ones\n"
+                "- Consider whether the example in the prompt contradicts your rule\n"
+                "- Think about what the LLM is actually doing wrong and WHY"
+            )
+        else:
+            warnings.append(
+                "CRITICAL: Your recent ideas are too similar and the score is "
+                "not improving. You MUST try something fundamentally different:\n"
+                "- Target a DIFFERENT failing eval than your last attempt\n"
+                "- Address the root cause instead of the symptom\n"
+                "- Use REPLACE to rewrite an existing instruction rather than "
+                "adding new ones\n"
+                "- Consider whether the example in the prompt contradicts your rule\n"
+                "- Think about what the LLM is actually doing wrong and WHY"
+            )
     elif plateau_depth >= 3 or repeat_detected:
         # Tier 1: Gentle nudge
-        warnings.append(
-            "The score has not improved recently. Try a different approach — "
-            "target a different failing eval, use REPLACE instead of APPEND, "
-            "or phrase the instruction in a fundamentally new way."
-        )
+        if focus_eval:
+            warnings.append(
+                f"The score for {focus_eval} has not improved recently. "
+                "Try a different approach — use REPLACE instead of APPEND, "
+                "or phrase the instruction in a fundamentally new way."
+            )
+        else:
+            warnings.append(
+                "The score has not improved recently. Try a different approach — "
+                "target a different failing eval, use REPLACE instead of APPEND, "
+                "or phrase the instruction in a fundamentally new way."
+            )
 
     # Detect repetitive prompt: find concrete duplicate lines
     dupes = _find_duplicate_lines(original_prompt)
@@ -795,6 +814,12 @@ def generate_improved_prompt_with_rationale(
     ideation_temp = min(0.7 + plateau_signal * 0.06, 1.2)
 
     system = _IDEATION_SYSTEM
+    if focus_eval:
+        system += (
+            f"\n\nCRITICAL: You MUST target eval {focus_eval}. Do not propose "
+            f"changes for any other eval. Set TARGET_EVAL: {focus_eval}. "
+            f"Ignore other failing evals — they are not your concern."
+        )
     if directive:
         system += (
             f"\n\nThe user has given you a specific directive. Focus on this "

@@ -362,8 +362,7 @@ def tune_cmd(
         click.echo(report.help_request)
         click.echo()
         click.echo(
-            "Tip: use 'prompterator improve -d \"...\"' to give the editor LLM\n"
-            "a specific instruction, then re-run tune."
+            "Tip: use 'prompterator improve -d \"...\"' to give the editor LLM a specific instruction, then re-run tune."
         )
 
     click.echo(f"\nPrompt updated: {prompt}")
