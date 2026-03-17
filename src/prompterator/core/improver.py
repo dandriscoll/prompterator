@@ -113,39 +113,44 @@ ISSUES:
 
         failing = [r for r in eval_results if not r.passed]
         passing = [r for r in eval_results if r.passed]
-        if failing:
-            fail_text = []
-            for r in failing:
-                tag = ">>> FOCUS" if focus_eval and r.eval_id == focus_eval else "FAIL"
-                line = f"- {tag} {r.eval_id} ({r.score:.1f}/10)"
-                if r.details:
-                    line += f" — {r.details}"
-                # Include eval criteria so the improver knows what to fix
-                spec = eval_specs.get(r.eval_id)
+
+        if focus_eval:
+            # When focused, only show the focus eval with full detail.
+            # Other evals are listed as a single "do not regress" line.
+            focus_result = next((r for r in eval_results if r.eval_id == focus_eval), None)
+            if focus_result:
+                line = f"- {focus_eval} ({focus_result.score:.1f}/10)"
+                if focus_result.details:
+                    line += f" — {focus_result.details}"
+                spec = eval_specs.get(focus_eval)
                 if spec and spec.rubric and spec.rubric.criteria:
                     for c in spec.rubric.criteria:
                         line += f"\n    Criterion: {c}"
-                fail_text.append(line)
-            if focus_eval:
-                header = f"FAILING EVALS (fix the FOCUS eval — {focus_eval}):"
-            else:
-                header = "FAILING EVALS (pick one to fix):"
-            prompt += f"\n\n{header}\n{chr(10).join(fail_text)}"
-        if passing:
-            pass_text = []
-            for r in passing:
-                if focus_eval and r.eval_id == focus_eval:
-                    line = f"- >>> FOCUS {r.eval_id} ({r.score:.1f}/10) — strengthen this eval"
+                status = "FAILING" if not focus_result.passed else "PASSING"
+                prompt += f"\n\nTARGET EVAL ({status} — improve this one):\n{line}"
+
+            others = [r for r in eval_results if r.eval_id != focus_eval]
+            if others:
+                other_lines = [f"- {r.eval_id} ({r.score:.1f}/10)" for r in others]
+                prompt += f"\n\nOTHER EVALS (do not regress — do NOT target these):\n{chr(10).join(other_lines)}"
+        else:
+            if failing:
+                fail_text = []
+                for r in failing:
+                    line = f"- FAIL {r.eval_id} ({r.score:.1f}/10)"
+                    if r.details:
+                        line += f" — {r.details}"
                     spec = eval_specs.get(r.eval_id)
                     if spec and spec.rubric and spec.rubric.criteria:
                         for c in spec.rubric.criteria:
                             line += f"\n    Criterion: {c}"
-                    pass_text.append(line)
-                else:
-                    pass_text.append(f"- PASS {r.eval_id} ({r.score:.1f}/10)")
-            prompt += f"\n\nPASSING EVALS (do not regress):\n{chr(10).join(pass_text)}"
-        if not failing and not focus_eval:
-            prompt += "\n\nAll evals are passing. Focus on strengthening the weakest eval."
+                    fail_text.append(line)
+                prompt += f"\n\nFAILING EVALS (pick one to fix):\n{chr(10).join(fail_text)}"
+            if passing:
+                pass_text = [f"- PASS {r.eval_id} ({r.score:.1f}/10)" for r in passing]
+                prompt += f"\n\nPASSING EVALS (do not regress):\n{chr(10).join(pass_text)}"
+            if not failing:
+                prompt += "\n\nAll evals are passing. Focus on strengthening the weakest eval."
 
     if edit_history:
         history_lines = []
