@@ -32,6 +32,28 @@ _CLUSTER_SYSTEM = (
 )
 
 
+def _split_feedback_entry(text: str) -> list[str]:
+    """Split a feedback entry that addresses multiple issues into separate items.
+
+    Reviewers often combine observations with semicolons, e.g.
+    "too chatty; incorrect grammar". This splits on semicolons (and
+    similar separators) when each part looks like an independent observation.
+    """
+    # Only split on semicolons — the most common multi-issue separator
+    if ";" not in text:
+        return [text]
+
+    parts = [p.strip() for p in text.split(";")]
+    # Keep only non-trivial parts (at least 2 words)
+    parts = [p for p in parts if len(p.split()) >= 2]
+
+    if len(parts) < 2:
+        # Splitting didn't produce multiple meaningful items — keep original
+        return [text]
+
+    return parts
+
+
 def _determine_severity(occurrences: int, total_feedback_sources: int) -> str:
     """Determine issue severity based on occurrence frequency."""
     if total_feedback_sources == 0:
@@ -90,10 +112,11 @@ def consolidate_feedback(
                     seen.add(key)
                     observations.append(key)
 
-    # Add new feedback
+    # Add new feedback, splitting multi-issue entries
     for feedback in feedback_list:
         for entry in feedback.entries:
-            observations.append((feedback.source_file, entry.text))
+            for part in _split_feedback_entry(entry.text):
+                observations.append((feedback.source_file, part))
 
     if not observations:
         return IssueFile(version="1.0", prompt_ref=prompt_ref, issues=[])

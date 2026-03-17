@@ -7,6 +7,7 @@ from tests.conftest import MockLLMClient
 from prompterator.core.issue import (
     _determine_severity,
     _generate_issue_id,
+    _split_feedback_entry,
     consolidate_feedback,
 )
 from prompterator.models.feedback import Feedback, FeedbackEntry
@@ -123,3 +124,41 @@ def test_issue_id_generation():
     """Issue IDs follow expected pattern (no category in ID)."""
     assert _generate_issue_id("test.prompt.txt", 1) == "issue-test-01"
     assert _generate_issue_id("foo.prompt.txt", 3) == "issue-foo-03"
+
+
+# ---------------------------------------------------------------------------
+# Feedback splitting
+# ---------------------------------------------------------------------------
+
+def test_split_semicolon():
+    """Semicolon-separated items become independent observations."""
+    parts = _split_feedback_entry("too chatty; incorrect grammar; missing examples")
+    assert len(parts) == 3
+    assert "too chatty" in parts[0]
+    assert "incorrect grammar" in parts[1]
+    assert "missing examples" in parts[2]
+
+
+def test_split_no_semicolon():
+    """Single observation stays as-is."""
+    parts = _split_feedback_entry("the output adds a preamble before the list")
+    assert parts == ["the output adds a preamble before the list"]
+
+
+def test_split_short_parts_kept_together():
+    """If splitting produces parts that are too short, keep original."""
+    parts = _split_feedback_entry("ok; no")
+    assert parts == ["ok; no"]
+
+
+def test_split_one_meaningful_part():
+    """If only one part is meaningful, keep original."""
+    parts = _split_feedback_entry("the output is too verbose; ok")
+    assert parts == ["the output is too verbose; ok"]
+
+
+def test_split_preserves_long_text():
+    """Long text without semicolons is unchanged."""
+    text = "the output adds a conversational preamble and then proceeds to restructure the entire list"
+    parts = _split_feedback_entry(text)
+    assert parts == [text]
