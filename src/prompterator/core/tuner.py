@@ -137,6 +137,7 @@ def run_tuning_loop(
     dialog_turns: int = 3,
     quiet: bool = False,
     focus_eval: str | None = None,
+    aggressive: bool = False,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -196,7 +197,9 @@ def run_tuning_loop(
     if run_dir is not None and baseline_rf.generated_outputs:
         for j, out_text in enumerate(baseline_rf.generated_outputs):
             (run_dir / f"{base_name}.baseline.output.{j + 1:03d}.txt").write_text(out_text)
-    stall_count = 0
+    # Aggressive mode starts with a high stall count so the improver
+    # uses forced strategies (tier 3) from the first iteration.
+    stall_count = 8 if aggressive else 0
 
     def _status(msg: str) -> None:
         if on_status:

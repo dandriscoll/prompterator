@@ -97,6 +97,11 @@ from prompterator.runners.llm import LLMClient, LLMError
     help="Number of author turns in multi-turn dialog",
 )
 @click.option(
+    "--aggressive",
+    is_flag=True,
+    help="Start with aggressive tuning strategies (skips gentle warm-up)",
+)
+@click.option(
     "--focus",
     "-f",
     type=str,
@@ -121,6 +126,7 @@ def tune_cmd(
     content: Path | None,
     dry_run: bool,
     all_evals: bool,
+    aggressive: bool,
     counterpart: Path | None,
     dialog_turns: int,
     focus: str | None,
@@ -321,6 +327,7 @@ def tune_cmd(
             dialog_turns=dialog_turns,
             quiet=quiet,
             focus_eval=focus,
+            aggressive=aggressive,
         )
     except LLMError as e:
         _clear_status()
