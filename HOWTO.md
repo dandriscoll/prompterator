@@ -56,7 +56,7 @@ Ask me:
 - Am I happy with the default output directories for issues, evals, and results, or do I want custom paths?
 
 ### 4. Feedback authoring with markback
-Feedback is written in `.mb` (markback) files — a lightweight markup format for annotating LLM outputs with inline human feedback. Each `.mb` file uses `@source` and `@prior` directives to reference the prompt and its output, then contains annotated feedback entries.
+Feedback is written in `.mb` (markback) files — a lightweight markup format for annotating LLM outputs with inline human feedback. Each `.mb` file uses `@file` and `@input` directives to reference the output being reviewed and its inputs (including the prompt), then contains annotated feedback entries.
 
 Ask me:
 - Am I familiar with markback, or do I need an overview of the `.mb` format?

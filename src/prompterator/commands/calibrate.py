@@ -295,7 +295,7 @@ def calibrate_cmd(
                 for fb in feedback_list:
                     mb_name = Path(fb.source_file).name
                     for entry in fb.entries:
-                        src = Path(entry.source_ref).name if entry.source_ref else mb_name
+                        src = Path(entry.file_ref).name if entry.file_ref else mb_name
                         if src == ex.source and entry.text.strip():
                             missed_texts.append(entry.text)
 

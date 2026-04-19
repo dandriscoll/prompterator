@@ -3,36 +3,36 @@
 from pathlib import Path
 
 
-def build_mb_block(source: str, priors: list[str], feedback: str) -> str:
+def build_mb_block(file_ref: str, inputs: list[str], feedback: str) -> str:
     """Build a single markback block.
 
     Args:
-        source: Value for the @source directive.
-        priors: Values for @prior directives (one or more).
+        file_ref: Value for the @file directive (the output being reviewed).
+        inputs: Values for @input directives (one or more).
         feedback: The observation text.
 
     Returns:
         A formatted markback block string.
     """
-    lines = [f"@source {source}"]
-    for prior in priors:
-        lines.append(f"@prior {prior}")
+    lines = [f"@file {file_ref}"]
+    for inp in inputs:
+        lines.append(f"@input {inp}")
     lines.append(f"<<< {feedback}")
     return "\n".join(lines)
 
 
-def build_mb_content(source: str, priors: list[str], observations: list[str]) -> str:
-    """Build complete markback content from a source, priors, and observations.
+def build_mb_content(file_ref: str, inputs: list[str], observations: list[str]) -> str:
+    """Build complete markback content from a file ref, inputs, and observations.
 
     Args:
-        source: Value for the @source directive.
-        priors: Values for @prior directives.
+        file_ref: Value for the @file directive.
+        inputs: Values for @input directives.
         observations: List of feedback observation strings.
 
     Returns:
         Complete markback file content with blocks separated by ---.
     """
-    blocks = [build_mb_block(source, priors, obs) for obs in observations]
+    blocks = [build_mb_block(file_ref, inputs, obs) for obs in observations]
     return "\n\n---\n\n".join(blocks) + "\n"
 
 
@@ -50,7 +50,6 @@ def derive_mb_path(source: str, output_dir: Path | None = None) -> Path:
         Path for the .mb file.
     """
     name = Path(source).name
-    # Strip all extensions after the stem base (e.g., 001-r1.out.md -> 001-r1)
     stem = name.split(".")[0]
     mb_name = f"{stem}.mb"
     if output_dir:
@@ -58,15 +57,15 @@ def derive_mb_path(source: str, output_dir: Path | None = None) -> Path:
     return Path(mb_name)
 
 
-def build_editor_template(source: str, priors: list[str]) -> str:
+def build_editor_template(file_ref: str, inputs: list[str]) -> str:
     """Build a template for interactive editing.
 
     Returns a string with instructions and placeholder lines.
     Lines starting with # are stripped when parsing.
 
     Args:
-        source: The source file path.
-        priors: Prior file paths.
+        file_ref: The output file path.
+        inputs: Input file paths.
 
     Returns:
         Editor template string.
@@ -74,10 +73,10 @@ def build_editor_template(source: str, priors: list[str]) -> str:
     lines = [
         "# Annotate: write one observation per line.",
         "# Lines starting with # are ignored. Empty lines are ignored.",
-        f"# Source: {source}",
+        f"# File:  {file_ref}",
     ]
-    for prior in priors:
-        lines.append(f"# Prior:  {prior}")
+    for inp in inputs:
+        lines.append(f"# Input: {inp}")
     lines.append("#")
     lines.append("# Examples:")
     lines.append("#   opens with a conversational paragraph that pollutes the output")

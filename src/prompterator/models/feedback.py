@@ -7,8 +7,8 @@ class FeedbackEntry(BaseModel):
     """A single feedback entry from a markback file."""
 
     text: str = Field(description="Feedback observation text")
-    source_ref: str | None = Field(default=None, description="Reference to the output being reviewed")
-    prior_ref: str | None = Field(default=None, description="Reference to the input/content file")
+    file_ref: str | None = Field(default=None, description="Reference to the output being reviewed (@file)")
+    input_ref: str | None = Field(default=None, description="Reference to the input/content file (@input)")
 
 
 class Feedback(BaseModel):

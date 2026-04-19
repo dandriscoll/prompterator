@@ -8,17 +8,17 @@ from prompterator.config.loader import get_config_base_dir, load_config
 from prompterator.models.feedback import Feedback, FeedbackEntry
 
 
-def _extract_prior_prompt_ref(raw_content: str) -> str | None:
-    """Extract prompt file reference from @prior directives in raw .mb content.
+def _extract_input_prompt_ref(raw_content: str) -> str | None:
+    """Extract prompt file reference from @input directives in raw .mb content.
 
-    The markback library only stores one @prior per record (the last one),
-    but .mb files can have multiple @prior lines per block.  We need to
-    scan the raw text to find the @prior that points to the prompt file
+    The markback library only stores one @input per record (the last one),
+    but .mb files can have multiple @input lines per block.  We need to
+    scan the raw text to find the @input that points to the prompt file
     (.prompt.txt or .prompt.md) rather than the input data file.
     """
     for line in raw_content.splitlines():
         line = line.strip()
-        if line.startswith("@prior "):
+        if line.startswith("@input "):
             value = line.split(" ", 1)[1].strip()
             if value.endswith(".prompt.txt") or value.endswith(".prompt.md"):
                 return value
@@ -46,9 +46,9 @@ def parse_mb_file(path: Path) -> Feedback:
 
     entries = []
 
-    # The markback library only stores one @prior per record (the last).
-    # Scan raw content to find the @prior that references the prompt file.
-    prompt_ref = _extract_prior_prompt_ref(content)
+    # The markback library only stores one @input per record (the last).
+    # Scan raw content to find the @input that references the prompt file.
+    prompt_ref = _extract_input_prompt_ref(content)
 
     # Extract feedback from markback records
     for record in result.records:
@@ -56,13 +56,13 @@ def parse_mb_file(path: Path) -> Feedback:
         if not feedback_text:
             continue
 
-        # Extract source and prior refs from this record
-        source_ref = None
-        prior_ref = None
-        if hasattr(record, "source") and record.source:
-            source_ref = getattr(record.source, "value", None) or str(record.source)
-        if hasattr(record, "prior") and record.prior:
-            prior_ref = getattr(record.prior, "value", None) or str(record.prior)
+        # Extract file and input refs from this record
+        file_ref = None
+        input_ref = None
+        if record.file:
+            file_ref = getattr(record.file, "value", None) or str(record.file)
+        if record.input:
+            input_ref = getattr(record.input, "value", None) or str(record.input)
 
         # Check for ref= in the feedback
         if "ref=" in feedback_text:
@@ -80,8 +80,8 @@ def parse_mb_file(path: Path) -> Feedback:
         if feedback_text:
             entries.append(FeedbackEntry(
                 text=feedback_text,
-                source_ref=source_ref,
-                prior_ref=prior_ref,
+                file_ref=file_ref,
+                input_ref=input_ref,
             ))
 
     # Try to infer prompt_ref from filename if not found
@@ -152,8 +152,8 @@ def feedback_cmd(directory: Path | None, as_json: bool) -> None:
                 "entries": [
                 {
                     "text": e.text,
-                    **({"source_ref": e.source_ref} if e.source_ref else {}),
-                    **({"prior_ref": e.prior_ref} if e.prior_ref else {}),
+                    **({"file_ref": e.file_ref} if e.file_ref else {}),
+                    **({"input_ref": e.input_ref} if e.input_ref else {}),
                 }
                 for e in f.entries
             ],

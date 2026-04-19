@@ -50,12 +50,12 @@ def _edit_interactively(template: str) -> list[str]:
 @click.command("annotate")
 @click.argument("source", type=str)
 @click.option(
-    "--prior",
-    "priors",
+    "--input",
+    "inputs",
     type=str,
     multiple=True,
     required=True,
-    help="Prior file (prompt, input data, etc.). Repeatable.",
+    help="Input file (prompt, input data, etc.). Repeatable.",
 )
 @click.option(
     "-m",
@@ -89,7 +89,7 @@ def _edit_interactively(template: str) -> list[str]:
 )
 def annotate_cmd(
     source: str,
-    priors: tuple[str, ...],
+    inputs: tuple[str, ...],
     messages: tuple[str, ...],
     output: Path | None,
     append: bool,
@@ -109,26 +109,26 @@ def annotate_cmd(
     \b
     Examples:
       prompterator annotate outputs/001-r1.out.md \\
-        --prior improve-todo.prompt.md --prior 001.todoosy.md \\
+        --input improve-todo.prompt.md --input 001.todoosy.md \\
         -m "opens with conversational preamble" \\
         -m "replaced checkboxes with priority sections"
 
       prompterator annotate outputs/002-r1.out.md \\
-        --prior improve-todo.prompt.md --prior 002.todoosy.md \\
+        --input improve-todo.prompt.md --input 002.todoosy.md \\
         -e
 
       echo "chatbot sign-off at the end" | prompterator annotate outputs/003-r1.out.md \\
-        --prior improve-todo.prompt.md
+        --input improve-todo.prompt.md
     """
     config = load_config()
     base_dir = get_config_base_dir()
-    prior_list = list(priors)
+    input_list = list(inputs)
 
     # Collect observations from all input methods
     observations: list[str] = list(messages)
 
     if edit:
-        template = build_editor_template(source, prior_list)
+        template = build_editor_template(source, input_list)
         editor_obs = _edit_interactively(template)
         observations.extend(editor_obs)
     elif not messages and not sys.stdin.isatty():
@@ -140,7 +140,7 @@ def annotate_cmd(
         raise SystemExit(1)
 
     # Build markback content
-    content = build_mb_content(source, prior_list, observations)
+    content = build_mb_content(source, input_list, observations)
 
     if dry_run:
         click.echo(content, nl=False)

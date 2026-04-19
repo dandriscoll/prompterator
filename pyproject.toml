@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prompterator"
-version = "0.3.0"
+version = "0.4.0"
 description = "CLI tool for prompt improvement workflow"
 readme = "README.md"
 license = "MIT"
@@ -28,7 +28,7 @@ dependencies = [
     "pydantic>=2.0",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
-    "markback>=0.1.0",
+    "markback>=0.2.0",
 ]
 
 [project.optional-dependencies]

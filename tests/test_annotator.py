@@ -15,30 +15,30 @@ from prompterator.core.annotator import (
 # build_mb_block
 # ---------------------------------------------------------------------------
 
-def test_build_mb_block_single_prior():
+def test_build_mb_block_single_input():
     result = build_mb_block("outputs/001.out.md", ["prompt.md"], "bad preamble")
     assert result == (
-        "@source outputs/001.out.md\n"
-        "@prior prompt.md\n"
+        "@file outputs/001.out.md\n"
+        "@input prompt.md\n"
         "<<< bad preamble"
     )
 
 
-def test_build_mb_block_multiple_priors():
+def test_build_mb_block_multiple_inputs():
     result = build_mb_block(
         "outputs/001.out.md",
         ["improve-todo.prompt.md", "001.todoosy.md"],
         "replaced checkboxes",
     )
-    assert "@prior improve-todo.prompt.md\n" in result
-    assert "@prior 001.todoosy.md\n" in result
+    assert "@input improve-todo.prompt.md\n" in result
+    assert "@input 001.todoosy.md\n" in result
     assert result.endswith("<<< replaced checkboxes")
 
 
-def test_build_mb_block_image_source():
+def test_build_mb_block_image_file():
     """Image files work the same as text files."""
     result = build_mb_block("outputs/001-r1.out.md", ["improve-todo.prompt.md"], "adds preamble")
-    assert result.startswith("@source outputs/001-r1.out.md\n")
+    assert result.startswith("@file outputs/001-r1.out.md\n")
 
 
 # ---------------------------------------------------------------------------
@@ -61,9 +61,9 @@ def test_build_mb_content_multiple_observations():
     blocks = content.split("\n---\n")
     assert len(blocks) == 3
     for block in blocks:
-        assert "@source outputs/001.out.md" in block
-        assert "@prior prompt.md" in block
-        assert "@prior data.md" in block
+        assert "@file outputs/001.out.md" in block
+        assert "@input prompt.md" in block
+        assert "@input data.md" in block
     assert "<<< first issue" in blocks[0]
     assert "<<< second issue" in blocks[1]
     assert "<<< third issue" in blocks[2]
@@ -96,9 +96,9 @@ def test_derive_mb_path_no_extension():
 
 def test_editor_template_contains_context():
     template = build_editor_template("out.jpg", ["prompt.md", "blend.md"])
-    assert "# Source: out.jpg" in template
-    assert "# Prior:  prompt.md" in template
-    assert "# Prior:  blend.md" in template
+    assert "# File:  out.jpg" in template
+    assert "# Input: prompt.md" in template
+    assert "# Input: blend.md" in template
 
 
 def test_parse_editor_result_strips_comments_and_blanks():

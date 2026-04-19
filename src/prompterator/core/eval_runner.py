@@ -342,7 +342,7 @@ def map_content_to_evals(
 ) -> dict[int, list[str]] | None:
     """Map each content file to the eval IDs that apply to it.
 
-    Traces the chain: content → feedback (via prior_ref) → issues
+    Traces the chain: content → feedback (via input_ref) → issues
     (via evidence source) → evals (via issue_ref).
 
     Returns:
@@ -355,9 +355,9 @@ def map_content_to_evals(
     for fb in feedback_list:
         mb_name = Path(fb.source_file).name
         for entry in fb.entries:
-            if entry.prior_ref:
-                prior_name = Path(entry.prior_ref).name
-                content_to_mb.setdefault(prior_name, set()).add(mb_name)
+            if entry.input_ref:
+                input_name = Path(entry.input_ref).name
+                content_to_mb.setdefault(input_name, set()).add(mb_name)
 
     # Step 2: Map .mb source basename → set of issue IDs
     mb_to_issues: dict[str, set[str]] = {}

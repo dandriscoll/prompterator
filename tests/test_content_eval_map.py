@@ -25,11 +25,11 @@ def _make_content(name: str, tmp_dir: Path) -> Path:
     return p
 
 
-def _make_feedback(mb_name: str, prior_ref: str, text: str) -> Feedback:
+def _make_feedback(mb_name: str, input_ref: str, text: str) -> Feedback:
     return Feedback(
         source_file=mb_name,
         prompt_ref="test.prompt.txt",
-        entries=[FeedbackEntry(text=text, prior_ref=prior_ref)],
+        entries=[FeedbackEntry(text=text, input_ref=input_ref)],
     )
 
 
@@ -182,8 +182,8 @@ def test_map_content_empty_eval_set(tmp_path):
     assert result[0] == []  # No evals apply
 
 
-def test_map_content_full_path_prior_ref(tmp_path):
-    """prior_ref with full path still matches content basename."""
+def test_map_content_full_path_input_ref(tmp_path):
+    """input_ref with full path still matches content basename."""
     content_paths = [_make_content("doc01.md", tmp_path)]
     feedback_list = [
         Feedback(
@@ -191,7 +191,7 @@ def test_map_content_full_path_prior_ref(tmp_path):
             prompt_ref="test.prompt.txt",
             entries=[FeedbackEntry(
                 text="feedback",
-                prior_ref="/some/full/path/doc01.md",
+                input_ref="/some/full/path/doc01.md",
             )],
         ),
     ]

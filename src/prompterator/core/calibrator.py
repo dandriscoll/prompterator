@@ -189,17 +189,17 @@ def determine_verdict(detection_rate: float) -> str:
 
 
 def _resolve_input_content(
-    prior_ref: str | None,
+    input_ref: str | None,
     feedback_dir: Path | None,
 ) -> str | None:
-    """Try to read the input/content file referenced by a prior_ref.
+    """Try to read the input/content file referenced by an input_ref.
 
     Returns the file contents if found, None otherwise.
     """
-    if not prior_ref:
+    if not input_ref:
         return None
 
-    ref_path = Path(prior_ref)
+    ref_path = Path(input_ref)
     # Try as-is (absolute or relative to cwd)
     if ref_path.exists():
         return ref_path.read_text()
@@ -227,7 +227,7 @@ def estimate_calibration_calls(
             for entry in fb.entries:
                 if not entry.text.strip():
                     continue
-                src_name = Path(entry.source_ref).name if entry.source_ref else mb_name
+                src_name = Path(entry.file_ref).name if entry.file_ref else mb_name
                 if (mb_name, entry.text) in evidence_entries or (src_name, entry.text) in evidence_entries:
                     total += 1
     return total
@@ -245,7 +245,7 @@ def calibrate(
     """Run calibration for all evals against labeled feedback.
 
     Each markback record is treated as an individual calibration row.
-    The record's source_ref identifies the output, and prior_ref
+    The record's file_ref identifies the output, and input_ref
     identifies the input content — both are used for label matching
     and passed to the eval for alignment checking.
 
@@ -254,7 +254,7 @@ def calibrate(
         feedback_list: All parsed feedback for the prompt.
         issue_file: Issue file for label classification.
         llm_client: LLM client for running evals.
-        feedback_dir: Directory containing .mb files (for resolving prior refs).
+        feedback_dir: Directory containing .mb files (for resolving input refs).
 
     Returns:
         List of CalibrationResult, one per eval.
@@ -279,14 +279,14 @@ def calibrate(
                 # Only include entries whose text matches evidence for this eval's issue.
                 # An .mb file may have entries about many categories — we only want the
                 # specific entry that was cited as evidence, not all entries from that file.
-                src_name = Path(entry.source_ref).name if entry.source_ref else mb_name
+                src_name = Path(entry.file_ref).name if entry.file_ref else mb_name
                 if (mb_name, entry.text) not in evidence_entries and (src_name, entry.text) not in evidence_entries:
                     continue
                 label = "FAIL"
 
-                # Resolve input content from prior_ref
+                # Resolve input content from input_ref
                 input_content = _resolve_input_content(
-                    entry.prior_ref, feedback_dir or mb_dir,
+                    entry.input_ref, feedback_dir or mb_dir,
                 )
 
                 eval_passed = run_calibration_eval(
@@ -376,7 +376,7 @@ def revise_eval_criteria(
     fb_by_source: dict[str, list[str]] = {}
     for fb in feedback_list:
         for entry in fb.entries:
-            src = Path(entry.source_ref).name if entry.source_ref else Path(fb.source_file).name
+            src = Path(entry.file_ref).name if entry.file_ref else Path(fb.source_file).name
             fb_by_source.setdefault(src, []).append(entry.text)
 
     for ex in calibration.examples:

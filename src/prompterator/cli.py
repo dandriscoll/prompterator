@@ -1,11 +1,11 @@
 """CLI definition for prompterator."""
 
+from importlib.metadata import version as _pkg_version
 from pathlib import Path as _Path
 
 import click
 from dotenv import load_dotenv
 
-from prompterator import __version__
 from prompterator.commands.annotate import annotate_cmd
 from prompterator.commands.calibrate import calibrate_cmd
 from prompterator.commands.collect import collect_cmd
@@ -40,7 +40,7 @@ _debug_option = click.option(
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
-@click.version_option(version=__version__, prog_name="prompterator")
+@click.version_option(version=_pkg_version("prompterator"), prog_name="prompterator")
 def main() -> None:
     """Prompterator - CLI tool for prompt improvement workflow.
 

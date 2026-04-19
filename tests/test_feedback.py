@@ -4,72 +4,72 @@ import tempfile
 from pathlib import Path
 
 from prompterator.commands.feedback import (
-    _extract_prior_prompt_ref,
+    _extract_input_prompt_ref,
     parse_mb_file,
 )
 
 
-# ── _extract_prior_prompt_ref tests ──
+# ── _extract_input_prompt_ref tests ──
 
 
-def test_extract_prior_prompt_ref_from_prompt_md():
-    """Prompt .md file is found among multiple @prior lines."""
+def test_extract_input_prompt_ref_from_prompt_md():
+    """Prompt .md file is found among multiple @input lines."""
     content = """\
-@source outputs/001-r1.out.md
-@prior improve-todo.prompt.md
-@prior 001.todoosy.md
+@file outputs/001-r1.out.md
+@input improve-todo.prompt.md
+@input 001.todoosy.md
 <<< opens with a conversational paragraph
 """
-    assert _extract_prior_prompt_ref(content) == "improve-todo.prompt.md"
+    assert _extract_input_prompt_ref(content) == "improve-todo.prompt.md"
 
 
-def test_extract_prior_prompt_ref_from_prompt_txt():
+def test_extract_input_prompt_ref_from_prompt_txt():
     """Prompt .txt file is found."""
     content = """\
-@source outputs/001-r1.out.md
-@prior my-prompt.prompt.txt
-@prior data.csv
+@file outputs/001-r1.out.md
+@input my-prompt.prompt.txt
+@input data.csv
 <<< some feedback text
 """
-    assert _extract_prior_prompt_ref(content) == "my-prompt.prompt.txt"
+    assert _extract_input_prompt_ref(content) == "my-prompt.prompt.txt"
 
 
-def test_extract_prior_prompt_ref_no_prompt():
-    """Returns None when no @prior ends in .prompt.md/.prompt.txt."""
+def test_extract_input_prompt_ref_no_prompt():
+    """Returns None when no @input ends in .prompt.md/.prompt.txt."""
     content = """\
-@source outputs/001-r1.out.md
-@prior data.csv
+@file outputs/001-r1.out.md
+@input data.csv
 <<< some feedback text
 """
-    assert _extract_prior_prompt_ref(content) is None
+    assert _extract_input_prompt_ref(content) is None
 
 
-def test_extract_prior_prompt_ref_first_match_wins():
+def test_extract_input_prompt_ref_first_match_wins():
     """If multiple prompt files exist, the first one wins."""
     content = """\
-@prior first.prompt.md
-@prior second.prompt.md
+@input first.prompt.md
+@input second.prompt.md
 <<< some feedback text
 """
-    assert _extract_prior_prompt_ref(content) == "first.prompt.md"
+    assert _extract_input_prompt_ref(content) == "first.prompt.md"
 
 
 # ── parse_mb_file integration tests ──
 
 
-def test_parse_mb_file_prompt_ref_from_prior():
-    """Full .mb file uses @prior for prompt_ref, not @source."""
+def test_parse_mb_file_prompt_ref_from_input():
+    """Full .mb file uses @input for prompt_ref, not @file."""
     content = """\
-@source outputs/001-r1.out.md
-@prior improve-todo.prompt.md
-@prior 001.todoosy.md
+@file outputs/001-r1.out.md
+@input improve-todo.prompt.md
+@input 001.todoosy.md
 <<< opens with a conversational paragraph that pollutes the output
 
 ---
 
-@source outputs/001-r1.out.md
-@prior improve-todo.prompt.md
-@prior 001.todoosy.md
+@file outputs/001-r1.out.md
+@input improve-todo.prompt.md
+@input 001.todoosy.md
 <<< replaced checkboxes with priority-grouped sections
 """
     with tempfile.NamedTemporaryFile(
@@ -91,8 +91,8 @@ def test_parse_mb_file_prompt_ref_from_prior():
 def test_parse_mb_file_all_entries_kept():
     """Feedback parsing keeps all entries including positive observations."""
     content = """\
-@source outputs/001-r1.out.md
-@prior test.prompt.md
+@file outputs/001-r1.out.md
+@input test.prompt.md
 <<< individual item rewrites are actually clearer than the originals
 """
     with tempfile.NamedTemporaryFile(

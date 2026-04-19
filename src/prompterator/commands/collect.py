@@ -1,4 +1,4 @@
-"""Collect command - gather mb files with their source and prior files."""
+"""Collect command - gather mb files with their file and input refs."""
 
 import shutil
 from pathlib import Path
@@ -7,13 +7,13 @@ import click
 
 
 def parse_mb_directives(mb_path: Path) -> tuple[str | None, str | None]:
-    """Parse @source and @prior directives from an mb file.
+    """Parse @file and @input directives from an mb file.
 
     Uses markback library when possible, falls back to manual parsing
     for files without feedback lines.
 
     Returns:
-        Tuple of (source_value, prior_value) - values may be None if not found.
+        Tuple of (file_value, input_value) - values may be None if not found.
     """
     try:
         import markback
@@ -27,61 +27,61 @@ def parse_mb_directives(mb_path: Path) -> tuple[str | None, str | None]:
     # If markback found records, use them
     if result.records:
         rec = result.records[0]
-        source_value = rec.source.value if rec.source else None
-        prior_value = None
-        if hasattr(rec, "prior") and rec.prior:
-            prior_value = rec.prior.value
-        if source_value or prior_value:
+        file_value = rec.file.value if rec.file else None
+        input_value = None
+        if rec.input:
+            input_value = rec.input.value
+        if file_value or input_value:
             # Only return early if we got at least one value from markback
             # Otherwise fall through to manual parsing
-            if not prior_value:
-                # Try manual parsing for prior
+            if not input_value:
+                # Try manual parsing for input
                 content = mb_path.read_text()
                 for line in content.splitlines():
                     line = line.strip()
-                    if line.startswith("@prior "):
-                        prior_value = line[7:].strip()
+                    if line.startswith("@input "):
+                        input_value = line[7:].strip()
                         break
-            return source_value, prior_value
+            return file_value, input_value
 
     # Fall back to manual parsing for files without feedback lines
     content = mb_path.read_text()
 
-    source_value = None
-    prior_value = None
+    file_value = None
+    input_value = None
 
     for line in content.splitlines():
         line = line.strip()
-        if line.startswith("@source "):
-            source_value = line[8:].strip()
-        elif line.startswith("@prior "):
-            prior_value = line[7:].strip()
+        if line.startswith("@file "):
+            file_value = line[6:].strip()
+        elif line.startswith("@input "):
+            input_value = line[7:].strip()
 
-    return source_value, prior_value
+    return file_value, input_value
 
 
-def get_source_file(mb_path: Path) -> Path | None:
-    """Extract source file reference from an mb file.
+def get_file_ref(mb_path: Path) -> Path | None:
+    """Extract file reference from an mb file.
 
-    Looks for @source directive in the mb file.
+    Looks for @file directive in the mb file.
     """
-    source_value, _ = parse_mb_directives(mb_path)
+    file_value, _ = parse_mb_directives(mb_path)
 
-    if source_value:
-        return mb_path.parent / source_value
+    if file_value:
+        return mb_path.parent / file_value
 
     return None
 
 
-def get_prior_file(mb_path: Path) -> Path | None:
-    """Extract prior file reference from an mb file.
+def get_input_ref(mb_path: Path) -> Path | None:
+    """Extract input reference from an mb file.
 
-    Looks for @prior directive in the mb file.
+    Looks for @input directive in the mb file.
     """
-    _, prior_value = parse_mb_directives(mb_path)
+    _, input_value = parse_mb_directives(mb_path)
 
-    if prior_value:
-        return mb_path.parent / prior_value
+    if input_value:
+        return mb_path.parent / input_value
 
     return None
 
@@ -91,7 +91,7 @@ def collect_files(
     dest_dir: Path,
     dry_run: bool = False,
 ) -> tuple[list[Path], list[str]]:
-    """Collect an mb file and its related source/prior files.
+    """Collect an mb file and its related @file and @input targets.
 
     Returns:
         Tuple of (copied_files, warnings)
@@ -104,41 +104,41 @@ def collect_files(
         warnings.append(f"mb file not found: {mb_path}")
         return copied, warnings
 
-    # Get source and prior files
-    source_path = get_source_file(mb_path)
-    prior_path = get_prior_file(mb_path)
+    # Get file and input targets
+    file_path = get_file_ref(mb_path)
+    input_path = get_input_ref(mb_path)
 
     # Collect the files
     files_to_copy = [
         ("mb", mb_path),
     ]
 
-    if source_path:
-        if source_path.exists():
-            files_to_copy.append(("source", source_path))
+    if file_path:
+        if file_path.exists():
+            files_to_copy.append(("file", file_path))
         else:
-            warnings.append(f"source file not found: {source_path}")
+            warnings.append(f"@file target not found: {file_path}")
     else:
-        warnings.append(f"no @source directive in: {mb_path.name}")
+        warnings.append(f"no @file directive in: {mb_path.name}")
 
-    if prior_path:
-        if prior_path.exists():
-            files_to_copy.append(("prior", prior_path))
+    if input_path:
+        if input_path.exists():
+            files_to_copy.append(("input", input_path))
         else:
-            warnings.append(f"prior file not found: {prior_path}")
+            warnings.append(f"@input target not found: {input_path}")
     else:
-        warnings.append(f"no @prior directive in: {mb_path.name}")
+        warnings.append(f"no @input directive in: {mb_path.name}")
 
     # Copy files
-    for file_type, file_path in files_to_copy:
-        dest_path = dest_dir / file_path.name
+    for file_type, path in files_to_copy:
+        dest_path = dest_dir / path.name
 
         if dry_run:
-            click.echo(f"  [{file_type}] {file_path} -> {dest_path}")
+            click.echo(f"  [{file_type}] {path} -> {dest_path}")
         else:
             # Avoid overwriting if source and dest are the same
-            if file_path.resolve() != dest_path.resolve():
-                shutil.copy2(file_path, dest_path)
+            if path.resolve() != dest_path.resolve():
+                shutil.copy2(path, dest_path)
             copied.append(dest_path)
 
     return copied, warnings
@@ -168,13 +168,13 @@ def collect_cmd(
     dest_dir: Path,
     dry_run: bool,
 ) -> None:
-    """Collect mb files with their source and prior files.
+    """Collect mb files with their @file and @input targets.
 
     FILES are paths to .mb files (supports shell globs like *.mb).
 
     For each mb file, this command finds:
-    - The source file (from @source directive in the mb file)
-    - The prior file (from @prior directive in the mb file)
+    - The file target (from @file directive in the mb file)
+    - The input target (from @input directive in the mb file)
 
     And copies all three to the destination directory.
 
