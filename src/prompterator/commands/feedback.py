@@ -56,11 +56,13 @@ def parse_mb_file(path: Path) -> Feedback:
         if not feedback_text:
             continue
 
-        # Fall back to @source if no prompt prior was found in raw content
-        if not prompt_ref and hasattr(record, "source") and record.source:
-            source_val = getattr(record.source, "value", None) or str(record.source)
-            if source_val:
-                prompt_ref = source_val
+        # Extract source and prior refs from this record
+        source_ref = None
+        prior_ref = None
+        if hasattr(record, "source") and record.source:
+            source_ref = getattr(record.source, "value", None) or str(record.source)
+        if hasattr(record, "prior") and record.prior:
+            prior_ref = getattr(record.prior, "value", None) or str(record.prior)
 
         # Check for ref= in the feedback
         if "ref=" in feedback_text:
@@ -76,7 +78,11 @@ def parse_mb_file(path: Path) -> Feedback:
 
         feedback_text = feedback_text.strip()
         if feedback_text:
-            entries.append(FeedbackEntry(text=feedback_text))
+            entries.append(FeedbackEntry(
+                text=feedback_text,
+                source_ref=source_ref,
+                prior_ref=prior_ref,
+            ))
 
     # Try to infer prompt_ref from filename if not found
     if not prompt_ref:
@@ -143,7 +149,14 @@ def feedback_cmd(directory: Path | None, as_json: bool) -> None:
             {
                 "source_file": f.source_file,
                 "prompt_ref": f.prompt_ref,
-                "entries": [{"text": e.text} for e in f.entries],
+                "entries": [
+                {
+                    "text": e.text,
+                    **({"source_ref": e.source_ref} if e.source_ref else {}),
+                    **({"prior_ref": e.prior_ref} if e.prior_ref else {}),
+                }
+                for e in f.entries
+            ],
             }
             for f in all_feedback
         ]
