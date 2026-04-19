@@ -12,6 +12,7 @@ def generate_from_prompt(
     system: str | None = None,
     content: str | None = None,
     timeout: int = 300,
+    output_path: str | None = None,
 ) -> str:
     """Send a prompt file through the Author LLM and return the response.
 
@@ -36,12 +37,15 @@ def generate_from_prompt(
     if content is not None:
         if "{{INPUT}}" in prompt_text:
             user_message = prompt_text.replace("{{INPUT}}", content)
-            return llm.generate(user_message, system=system, timeout=timeout)
+            return llm.generate(user_message, system=system, timeout=timeout,
+                                output_path=output_path)
         else:
             # Prompt becomes system, content becomes user message
             effective_system = prompt_text
             if system:
                 effective_system = system + "\n\n" + prompt_text
-            return llm.generate(content, system=effective_system, timeout=timeout)
+            return llm.generate(content, system=effective_system, timeout=timeout,
+                                output_path=output_path)
 
-    return llm.generate(prompt_text, system=system, timeout=timeout)
+    return llm.generate(prompt_text, system=system, timeout=timeout,
+                        output_path=output_path)

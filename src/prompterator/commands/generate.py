@@ -198,7 +198,7 @@ def generate_cmd(
             try:
                 result = generate_from_prompt(
                     prompt, llm, system=system, content=content_text,
-                    timeout=timeout,
+                    timeout=timeout, output_path=str(out_path),
                 )
                 progress.tick(cf.name if cf else "")
             except LLMError as e:

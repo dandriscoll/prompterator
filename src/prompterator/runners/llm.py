@@ -189,6 +189,7 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
         timeout: int = 300,
+        output_path: str | None = None,
     ) -> str:
         """Generate a response from the LLM.
 
@@ -225,6 +226,14 @@ class LLMClient:
         if self._api_version:
             args.extend(["--api-version", self._api_version])
 
+        # Allow runners that produce sidecar artifacts (images, audio, etc.)
+        # to co-locate them with the text output by exporting the intended
+        # output path. Text-only runners ignore it.
+        run_env = None
+        if output_path is not None:
+            import os as _os
+            run_env = {**_os.environ, "PROMPTERATOR_OUTPUT_PATH": str(output_path)}
+
         try:
             result = subprocess.run(
                 args,
@@ -233,6 +242,7 @@ class LLMClient:
                 text=True,
                 timeout=timeout,
                 check=True,
+                env=run_env,
             )
             response = result.stdout.strip()
             _log_call(system, prompt, response)
