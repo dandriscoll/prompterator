@@ -11,7 +11,7 @@ from prompterator.core.run import create_run_dir
 from prompterator.commands.resolve import ResolveError, resolve_prompt_and_evals, resolve_issues
 from prompterator.commands.feedback import find_mb_files, parse_mb_file
 from prompterator.models.calibration import CalibrationReport
-from prompterator.runners.llm import LLMClient, LLMError
+from prompterator.runners.llm import LLMClient, LLMError, enable_verbose
 
 
 @click.command("calibrate")
@@ -71,6 +71,9 @@ def calibrate_cmd(
     ``prompterator evals -d`` command. Use --auto-fix to have the LLM
     revise criteria automatically instead.
     """
+    if verbose:
+        enable_verbose()
+
     config = load_config()
     base_dir = get_config_base_dir()
 

@@ -39,6 +39,22 @@ _debug_option = click.option(
 )
 
 
+_verbose_option = click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    default=False,
+    help="Print full LLM runner stderr/stdout and call context on failure",
+    is_eager=True,
+    expose_value=False,
+    callback=lambda ctx, param, value: (
+        __import__("prompterator.runners.llm", fromlist=["enable_verbose"]).enable_verbose()
+        if value
+        else None
+    ),
+)
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=_pkg_version("prompterator"), prog_name="prompterator")
 def main() -> None:
@@ -83,6 +99,19 @@ for _cmd in (
     tune_cmd,
 ):
     _debug_option(_cmd)
+
+# Apply shared --verbose to LLM commands that don't already declare their own.
+# test_cmd and calibrate_cmd have a pre-existing --verbose that additionally
+# enables the LLM runner's verbose mode inside the command body.
+for _cmd in (
+    evals_cmd,
+    generate_cmd,
+    improve_cmd,
+    issues_cmd,
+    simplify_cmd,
+    tune_cmd,
+):
+    _verbose_option(_cmd)
 
 # Register commands
 main.add_command(init_cmd)

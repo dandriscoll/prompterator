@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -14,12 +15,21 @@ _debug_buffer: list[tuple[str, str | None, str, str]] = []
 _debug_context: str = ""
 _debug_seq: int = 0
 
+# Verbose mode prints full subprocess stderr/stdout and call context on failure.
+_verbose_enabled: bool = False
+
 
 def enable_debug_log() -> None:
     """Enable debug logging. Writes to cwd by default; overridden by set_debug_log_dir()."""
     global _debug_enabled, _debug_dir
     _debug_enabled = True
     _debug_dir = Path.cwd()
+
+
+def enable_verbose() -> None:
+    """Emit full subprocess stderr/stdout to stderr on LLM runner failure."""
+    global _verbose_enabled
+    _verbose_enabled = True
 
 
 def set_debug_log_dir(directory: Path) -> None:
@@ -60,6 +70,39 @@ def _log_call(system: str | None, prompt: str, response: str) -> None:
         _write_entry(context, system, prompt, response)
     else:
         _debug_buffer.append((context, system, prompt, response))
+
+
+def _decode(data) -> str:
+    if data is None:
+        return ""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data
+
+
+def _emit_failure(
+    reason: str,
+    args: list[str],
+    returncode: int | None,
+    stdout: str | None,
+    stderr: str | None,
+    prompt: str,
+) -> None:
+    """Print a detailed failure report to stderr for --verbose."""
+    ctx = _debug_context or "(none)"
+    lines = [
+        "",
+        f"[verbose] {reason}",
+        f"  context: {ctx}",
+        f"  command: {' '.join(args)}",
+    ]
+    if returncode is not None:
+        lines.append(f"  exit:    {returncode}")
+    prompt_preview = prompt if len(prompt) <= 500 else prompt[:500] + f"... [+{len(prompt) - 500} chars]"
+    lines.append(f"  prompt:  {prompt_preview!r}")
+    lines.append(f"  stderr:  {(stderr or '').strip() or '(empty)'}")
+    lines.append(f"  stdout:  {(stdout or '').strip() or '(empty)'}")
+    sys.stderr.write("\n".join(lines) + "\n")
 
 
 class LLMError(Exception):
@@ -196,8 +239,19 @@ class LLMClient:
             return response
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr or e.stdout or "Unknown error"
+            if _verbose_enabled:
+                _emit_failure("LLM runner exited non-zero", args, e.returncode, e.stdout, e.stderr, prompt)
             raise LLMError(f"LLM generation failed: {error_msg}")
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
+            if _verbose_enabled:
+                _emit_failure(
+                    f"LLM runner timed out after {timeout}s",
+                    args,
+                    None,
+                    _decode(e.stdout),
+                    _decode(e.stderr),
+                    prompt,
+                )
             raise LLMError(f"LLM generation timed out after {timeout}s")
         except FileNotFoundError:
             raise LLMError(f"LLM runner not found: {self._executable}")
@@ -222,8 +276,26 @@ class LLMClient:
             return json.loads(result.stdout)
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr or e.stdout or "Unknown error"
+            if _verbose_enabled:
+                _emit_failure(
+                    "descriptor request failed",
+                    [self._executable, "--descriptor"],
+                    e.returncode,
+                    e.stdout,
+                    e.stderr,
+                    "",
+                )
             raise LLMError(f"Failed to get descriptor: {error_msg}")
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
+            if _verbose_enabled:
+                _emit_failure(
+                    f"descriptor request timed out after {timeout}s",
+                    [self._executable, "--descriptor"],
+                    None,
+                    _decode(e.stdout),
+                    _decode(e.stderr),
+                    "",
+                )
             raise LLMError(f"Descriptor request timed out after {timeout}s")
         except json.JSONDecodeError as e:
             raise LLMError(f"Invalid JSON from descriptor: {e}")

@@ -17,7 +17,7 @@ from prompterator.commands.resolve import (
     resolve_prompt_and_evals,
 )
 from prompterator.runners.critic_script import CriticScriptError
-from prompterator.runners.llm import LLMClient, LLMError
+from prompterator.runners.llm import LLMClient, LLMError, enable_verbose
 
 
 @click.command("test")
@@ -100,6 +100,9 @@ def test_cmd(
     PROMPT is the path to the prompt file to test (optional — can be
     derived from eval files).
     """
+    if verbose:
+        enable_verbose()
+
     config = load_config()
     base_dir = get_config_base_dir()
 
