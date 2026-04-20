@@ -4,6 +4,7 @@ import json
 
 from prompterator.core.eval_spec import (
     CATEGORY_CRITERIA,
+    _CRITERIA_SYSTEM,
     _MAX_CRITERIA_PER_ISSUE,
     _deduplicate_details,
     _generate_eval_id,
@@ -332,3 +333,10 @@ def test_generate_evals_no_reorg_skips_reconciliation():
     assert len(eval_file.evals) == 1
     assert eval_file.evals[0].rubric.criteria == ["Existing criterion"]
     assert len(llm.calls) == 0  # no LLM calls — direct ID match
+
+
+def test_criteria_prompt_documents_parens_convention():
+    """Tripwire: criteria prompt must describe the `Category (instance)` convention."""
+    assert "Category (specific instance)" in _CRITERIA_SYSTEM
+    assert "parenthesised body" in _CRITERIA_SYSTEM
+    assert "probe" in _CRITERIA_SYSTEM.lower()

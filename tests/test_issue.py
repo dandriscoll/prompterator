@@ -5,6 +5,7 @@ import json
 from tests.conftest import MockLLMClient
 
 from prompterator.core.issue import (
+    _CLUSTER_SYSTEM,
     _determine_severity,
     _generate_issue_id,
     _split_feedback_entry,
@@ -194,3 +195,11 @@ def test_split_preserves_long_text():
     text = "the output adds a conversational preamble and then proceeds to restructure the entire list"
     parts = _split_feedback_entry(text)
     assert parts == [text]
+
+
+def test_cluster_prompt_documents_parens_convention():
+    """Tripwire: clustering prompt must describe the `Category (instance)` convention."""
+    assert "Category (specific instance)" in _CLUSTER_SYSTEM
+    assert "BEFORE the opening paren" in _CLUSTER_SYSTEM
+    assert "parenthesised body" in _CLUSTER_SYSTEM
+    assert "collapse" in _CLUSTER_SYSTEM
