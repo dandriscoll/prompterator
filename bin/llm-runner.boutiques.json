@@ -1,9 +1,9 @@
 {
   "name": "llm-runner",
   "description": "LLM runner interface for prompterator. Reads a user prompt from stdin and writes the LLM response to stdout.",
-  "tool-version": "0.1.0",
+  "tool-version": "0.2.0",
   "schema-version": "0.5",
-  "command-line": "llm-runner [--system SYSTEM] [--temperature TEMPERATURE] [--max-tokens MAX_TOKENS] [--model MODEL] [--endpoint ENDPOINT] [--api-version API_VERSION] [--descriptor]",
+  "command-line": "llm-runner [--system SYSTEM] [--temperature TEMPERATURE] [--max-tokens MAX_TOKENS] [--model MODEL] [--endpoint ENDPOINT] [--api-version API_VERSION] [--output-dir OUTPUT_DIR] [--descriptor]",
   "inputs": [
     {
       "id": "system",
@@ -57,6 +57,14 @@
       "description": "API version string (used by Azure OpenAI)."
     },
     {
+      "id": "output_dir",
+      "name": "Output directory",
+      "type": "String",
+      "optional": true,
+      "command-line-flag": "--output-dir",
+      "description": "Directory for sidecar artifacts (images, audio, etc.) produced by runners whose output is not purely textual. Text-only runners ignore this flag. Runners that honor it choose their own filenames within the directory."
+    },
+    {
       "id": "descriptor",
       "name": "Descriptor",
       "type": "Flag",
@@ -71,6 +79,13 @@
       "name": "LLM response",
       "path-template": "-",
       "description": "LLM response text written to stdout (or JSON descriptor when --descriptor is used)."
+    },
+    {
+      "id": "sidecar",
+      "name": "Sidecar artifact",
+      "path-template": "[OUTPUT_DIR]",
+      "optional": true,
+      "description": "For runners that produce non-textual artifacts (e.g. an author runner emitting an image): the file is written inside --output-dir, and its absolute path is echoed on stdout as 'IMAGE: <path>' (or similar protocol line). Text-only runners produce nothing here."
     }
   ],
   "error-codes": [
