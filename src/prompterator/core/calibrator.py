@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from prompterator.core.issue import _split_feedback_entry
 from prompterator.core.progress import Progress
 from prompterator.models.calibration import (
     CalibrationExample,
@@ -14,6 +15,29 @@ from prompterator.models.eval import Eval, EvalFile
 from prompterator.models.feedback import Feedback
 from prompterator.models.issue import IssueFile
 from prompterator.runners.llm import LLMClient
+
+
+def _entry_matches_evidence(
+    mb_name: str,
+    src_name: str,
+    entry_text: str,
+    evidence_entries: set[tuple[str, str]],
+) -> bool:
+    """True if the entry matches any (source, feedback) pair in evidence.
+
+    Issue consolidation applies ``_split_feedback_entry`` to entries before
+    storing them as evidence, so a compound entry like "A; B; C" can appear
+    in evidence as the fragment "B". Match on the full entry text first, then
+    on each split part, so calibrator and issue generator stay consistent.
+    """
+    if (mb_name, entry_text) in evidence_entries or (src_name, entry_text) in evidence_entries:
+        return True
+    for part in _split_feedback_entry(entry_text):
+        if part == entry_text:
+            continue
+        if (mb_name, part) in evidence_entries or (src_name, part) in evidence_entries:
+            return True
+    return False
 
 
 def classify_labels(
@@ -228,7 +252,7 @@ def estimate_calibration_calls(
                 if not entry.text.strip():
                     continue
                 src_name = Path(entry.file_ref).name if entry.file_ref else mb_name
-                if (mb_name, entry.text) in evidence_entries or (src_name, entry.text) in evidence_entries:
+                if _entry_matches_evidence(mb_name, src_name, entry.text, evidence_entries):
                     total += 1
     return total
 
@@ -280,7 +304,7 @@ def calibrate(
                 # An .mb file may have entries about many categories — we only want the
                 # specific entry that was cited as evidence, not all entries from that file.
                 src_name = Path(entry.file_ref).name if entry.file_ref else mb_name
-                if (mb_name, entry.text) not in evidence_entries and (src_name, entry.text) not in evidence_entries:
+                if not _entry_matches_evidence(mb_name, src_name, entry.text, evidence_entries):
                     continue
                 label = "FAIL"
 

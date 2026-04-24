@@ -410,6 +410,39 @@ def test_calibrate_multiple_evals():
     assert len(llm.calls) == 2  # one call per evidence source
 
 
+def test_calibrate_matches_semicolon_split_entries():
+    """Entries whose fragments appear in evidence (after ';' splitting) are matched."""
+    # Reviewer wrote a compound observation; issue consolidation stored only
+    # the relevant fragment as evidence. Calibrator must still match.
+    feedback_list = [
+        Feedback(
+            source_file="run.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[
+                FeedbackEntry(
+                    text="followed prompt; adds conversational preamble; face looks fine",
+                ),
+            ],
+        ),
+    ]
+    issue_file = _make_issue_file(["run.mb"])  # evidence text: "adds conversational preamble"
+    eval_file = EvalFile(
+        prompt_ref="test.prompt.txt",
+        evals=[_make_eval()],
+    )
+
+    llm = MockLLMClient(responses=[
+        "CRITERION: X\nRESULT: FAIL\nREASON: Bad\nOVERALL: FAIL\nSCORE: 0.0",
+    ])
+
+    results = calibrate(eval_file, feedback_list, issue_file, llm)
+    assert len(results) == 1
+    cal = results[0]
+    assert cal.num_examples == 1
+    assert cal.accuracy == 1.0
+    assert len(llm.calls) == 1
+
+
 def test_calibrate_only_matching_entries_from_multi_entry_file():
     """Only entries whose text matches evidence are calibrated, not all entries from the file."""
     # One .mb file with 3 entries, but only 1 is cited as evidence
