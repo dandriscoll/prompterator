@@ -153,6 +153,15 @@ class FeedbackConfig(BaseModel):
         ge=1,
         description="Minimum occurrences to create an issue",
     )
+    themes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "User-authored top-level categories for clustering. When set, these "
+            "are the only valid issue categories; anchors that don't fit any "
+            "theme are assigned to 'unassigned'. When empty, the LLM proposes "
+            "candidate themes (non-authoritative)."
+        ),
+    )
 
 
 class NamingConfig(BaseModel):
@@ -279,6 +288,7 @@ class Config(BaseModel):
             },
             "feedback": {
                 "min_occurrences": self.feedback.min_occurrences,
+                **({"themes": list(self.feedback.themes)} if self.feedback.themes else {}),
             },
             "naming": {
                 "executable": self.naming.executable,

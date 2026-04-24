@@ -98,14 +98,17 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool, direc
             except Exception as e:
                 click.echo(f"  Warning: could not load {issue_path}: {e}", err=True)
 
-        issue_file = consolidate_feedback(
+        result = consolidate_feedback(
             feedback_list,
             prompt_ref,
             llm_client,
             config.feedback.min_occurrences,
             existing_issues=existing_issues,
             directive=directive,
+            themes=list(config.feedback.themes),
         )
+        issue_file = result.issue_file
+        analysis = result.analysis
 
         if not issue_file.issues:
             n_obs = sum(
@@ -128,6 +131,35 @@ def issues_cmd(directory: Path | None, output: Path | None, dry_run: bool, direc
             save_issue_file(issue_file, issue_path)
             click.echo(f"  Created: {issue_path} ({len(issue_file.issues)} issues)")
             created += 1
+
+        proposal_mode = not config.feedback.themes
+        banner = (
+            "Coverage analysis (proposal mode — feedback.themes not configured):"
+            if proposal_mode
+            else "Coverage analysis:"
+        )
+        has_content = (
+            analysis.unassigned_anchor_count
+            or analysis.dropped_invented_theme_count
+            or analysis.missing_themes
+            or analysis.theme_adjustments
+        )
+        if has_content:
+            click.echo(f"  {banner}")
+            if analysis.unassigned_anchor_count:
+                click.echo(f"    Unassigned anchors: {analysis.unassigned_anchor_count}")
+            if analysis.dropped_invented_theme_count:
+                click.echo(
+                    f"    Dropped LLM-invented themes: {analysis.dropped_invented_theme_count} "
+                    "(rejected because they were not in feedback.themes)"
+                )
+            if analysis.missing_themes:
+                label = "Themes (proposed)" if proposal_mode else "Missing themes (suggested)"
+                click.echo(f"    {label}: {', '.join(analysis.missing_themes)}")
+            if analysis.theme_adjustments:
+                click.echo("    Theme adjustments (suggested):")
+                for adj in analysis.theme_adjustments:
+                    click.echo(f"      - {adj}")
 
     if not dry_run:
         click.echo(f"\nCreated {created} issue file(s) in {output}")

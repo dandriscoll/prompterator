@@ -14,10 +14,16 @@ _CRITERIA_SYSTEM = (
     "You convert an issue description into a single evaluation pass-criterion. "
     "The issue describes a PROBLEM. You produce ONE criterion that checks for "
     "the ABSENCE of that problem — it should PASS when the problem is gone.\n\n"
-    "You may also see EVIDENCE — actual feedback quotes describing what went "
-    "wrong. Use these to make your criterion SPECIFIC. Reference the concrete "
-    "words, patterns, or structures from the evidence, not generic categories.\n\n"
-    "PAREN CONVENTION. Feedback or issue text may be written as "
+    "You may also see a THEME (the user-authoritative axis this issue belongs "
+    "to) and EVIDENCE — concrete anchor instances distilled from feedback. "
+    "Use EVIDENCE to make your criterion SPECIFIC. Reference the concrete "
+    "words, patterns, or structures from the anchors, not generic categories.\n\n"
+    "GENERALIZATION IS CONSTRAINED. Generalize only across the evidence shown. "
+    "The criterion must be explainable from these anchors — do not broaden it "
+    "to cover problems belonging to other themes, and do not narrow it to one "
+    "specific anchor when multiple anchors point to the same generalized "
+    "behavior. Stay at the theme's level of abstraction.\n\n"
+    "PAREN CONVENTION. Evidence text may be written as "
     "`Category (specific instance)`. When you see this form, the parenthesised "
     "body is the concrete thing the critic must check for — treat it as the "
     "probe target. The category prefix groups the probe but is not itself "
@@ -94,10 +100,13 @@ def _criteria_from_issue(issue, llm_client: LLMClient | None = None, directive: 
     """
     if llm_client is not None:
         try:
-            # Build input with issue summary and concrete evidence
-            parts = [f"ISSUE: {issue.summary}"]
+            parts = [f"THEME: {issue.category}", f"ISSUE: {issue.summary}"]
             if issue.evidence:
-                evidence_texts = [ev.feedback for ev in issue.evidence[:5]]
+                # Prefer distilled anchor instances over raw feedback — they're
+                # the concrete probe targets the criterion should be framed around.
+                evidence_texts = [
+                    (ev.instance or ev.feedback) for ev in issue.evidence[:5]
+                ]
                 parts.append("EVIDENCE:\n" + "\n".join(f"- {t}" for t in evidence_texts))
             user_input = "\n\n".join(parts)
             if directive:

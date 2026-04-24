@@ -1,6 +1,7 @@
 """Issue consolidation logic - aggregate feedback into issues via LLM clustering."""
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from prompterator.models.feedback import Feedback
@@ -10,42 +11,80 @@ from prompterator.runners.llm import LLMClient
 
 _CLUSTER_SYSTEM = (
     "You are a feedback analyst. You receive a numbered list of free-form observations "
-    "about LLM-generated outputs. Your job is to cluster the observations by the real "
-    "underlying problem they describe. Prefer more clusters over fewer — only group "
-    "observations that describe the SAME specific problem together. Two observations "
-    "that point to different output problems should be separate clusters even if they "
-    "are thematically related. Ignore positive observations (praise, approval, "
-    "things that are fine). Do NOT create meta-issues about the feedback itself "
-    '(e.g. "feedback is repetitive" or "reviewers agree") — every cluster must '
-    "describe a problem with the output.\n\n"
-    "CATEGORY CONVENTION. Authors may write an observation as "
-    '`Category (specific instance)` — for example `Style issue (rushed cadence)`. '
-    "When you see this form:\n"
-    "  - Treat the text BEFORE the opening paren as the author-supplied category. "
-    "Use it as the cluster `label` (normalised to kebab-case).\n"
-    "  - Treat the parenthesised body as the concrete instance. Quote it in the "
-    "cluster `summary` so the specific detail is preserved.\n"
-    "  - Group observations that share the same category prefix into the same "
-    "cluster even when their parenthesised instances differ — the prefix is the "
-    "cluster, the paren body is one instance within it.\n"
-    "  - When two category prefixes in the batch are close variants (case, "
-    "pluralisation, minor wording), collapse them to a single canonical label. "
-    "Keep the total number of distinct categories small and stable.\n"
-    "Observations without parens behave as before — you infer a label from the text.\n\n"
-    "Output ONLY a JSON array of clusters. "
-    "Each cluster has:\n"
-    '  "label": a short kebab-case tag (e.g. "chatty-preamble", "structural-rewrite"),\n'
-    '  "summary": a SPECIFIC description of the problem that references concrete '
-    "details from the observations — quote exact words, phrases, or patterns from "
-    "the feedback (including paren-body instances when present). Do NOT write generic "
-    "summaries like 'output doesn't follow instructions' or 'content is not preserved'. "
-    "Instead cite what actually happened, "
-    "e.g. 'Output begins with a conversational sentence like \"Here\\'s your updated "
-    "list\" before the actual content' or 'Output replaces [ ] checkbox markers with "
-    "bullet-pointed priority sections',\n"
-    '  "evidence_indices": list of 0-based indices into the input observations.\n'
-    "Do not wrap the JSON in markdown fences."
+    "about LLM-generated outputs and a THEMES list. Your job executes three passes "
+    "in a single response:\n\n"
+    "  PASS 1 — ANCHORS. For each observation, emit an anchor: a concrete instance "
+    "of a problem with the output. Do not generalise here. Skip positive observations "
+    "(praise, things that are fine). Skip meta-observations about the feedback itself.\n"
+    "  PASS 2 — CLUSTERS. Group anchors by the real underlying problem they describe, "
+    "WITHIN the scope of a single theme. Do NOT cluster across themes. Prefer more "
+    "clusters over fewer — only group anchors that describe the SAME specific problem.\n"
+    "  PASS 3 — COVERAGE ANALYSIS. Note anchors that fit no configured theme, and "
+    "suggest (non-authoritative) adjustments if the current theme set consistently "
+    "strains to fit the anchors.\n\n"
+    "THEMES ARE AUTHORITATIVE. When THEMES is non-empty:\n"
+    "  - Every cluster's `theme` MUST be one of the configured themes, or the literal "
+    "string `unassigned` for anchors that genuinely fit none of them.\n"
+    "  - NEVER invent new themes. Candidate new themes go in `analysis.missing_themes` "
+    "as suggestions only.\n"
+    "  - An anchor may map to multiple themes if it supports more than one — the same "
+    "anchor index may appear in multiple clusters (one per matching theme).\n"
+    "When THEMES is empty, you are in PROPOSAL MODE: infer candidate themes from the "
+    "anchors, use them as cluster `theme` values, AND list them in "
+    "`analysis.missing_themes` so the user can adopt them authoritatively.\n\n"
+    "CATEGORY CONVENTION. Observations may be written as `Category (specific instance)` "
+    "— for example `Style issue (rushed cadence)`. The parenthesised body is the "
+    "concrete instance — use it verbatim (or closely paraphrased) as the anchor's "
+    "`instance`. The category prefix is a hint for theme assignment but does NOT "
+    "override the authoritative THEMES list.\n\n"
+    "ANCHORS PRESERVE INTENT. The anchor's `instance` must be grounded in the "
+    "observation's concrete detail — quote exact words, phrases, or patterns. Do NOT "
+    "write generic summaries like 'output doesn't follow instructions'. Cite what "
+    "actually happened, e.g. 'Output begins with a conversational sentence like "
+    "\"Here\\'s your updated list\" before the actual content' or 'Output replaces "
+    "[ ] checkbox markers with bullet-pointed priority sections'.\n\n"
+    "GENERALIZATION IS CONSTRAINED. Each cluster's `summary` generalises only across "
+    "its own anchors within its theme. The summary must be explainable from the "
+    "anchors it groups.\n\n"
+    "Output ONLY a single JSON object with these top-level keys:\n"
+    '  "anchors": list of {"index": int, "instance": str, '
+    '"confidence": "high"|"medium"|"low", "themes": list of theme names the anchor '
+    "supports (or [] if none)}.\n"
+    '  "clusters": list of {"theme": one of THEMES or "unassigned" (or a proposed '
+    'theme in proposal mode), "failure_mode": short kebab-case tag (e.g. '
+    '"chatty-preamble"), "summary": specific description grounded in the anchors, '
+    '"anchor_indices": list of 0-based indices into `anchors`}.\n'
+    '  "analysis": {"missing_themes": list of suggested theme names (always '
+    'suggestions, never authoritative), "theme_adjustments": list of suggested '
+    "refinements to existing themes as short strings}.\n"
+    "Do not wrap in markdown fences."
 )
+
+
+@dataclass(frozen=True)
+class Analysis:
+    """Coverage analysis output alongside the issue file.
+
+    Themes and adjustments here are always suggestions — they never
+    mutate the configured theme list, only inform the user.
+    """
+
+    missing_themes: list[str] = field(default_factory=list)
+    theme_adjustments: list[str] = field(default_factory=list)
+    unassigned_anchor_count: int = 0
+    dropped_invented_theme_count: int = 0
+
+
+@dataclass(frozen=True)
+class ConsolidationResult:
+    """Output of `consolidate_feedback`: the issue file plus coverage analysis."""
+
+    issue_file: IssueFile
+    analysis: Analysis
+
+    @property
+    def issues(self) -> list[Issue]:
+        return self.issue_file.issues
 
 
 def _split_feedback_entry(text: str) -> list[str]:
@@ -91,6 +130,44 @@ def _generate_issue_id(prompt_ref: str, index: int) -> str:
     return f"issue-{base}-{index:02d}"
 
 
+def _parse_llm_response(raw: str) -> dict | list:
+    """Parse the LLM's JSON response, tolerating surrounding text or fences."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    # Try object first, then array
+    for open_ch, close_ch in (("{", "}"), ("[", "]")):
+        start = raw.find(open_ch)
+        end = raw.rfind(close_ch) + 1
+        if start >= 0 and end > start:
+            try:
+                return json.loads(raw[start:end])
+            except json.JSONDecodeError:
+                continue
+    return {}
+
+
+def _normalize_cluster_response(
+    parsed: dict | list,
+) -> tuple[list[dict], list[dict], dict]:
+    """Coerce legacy (bare cluster array) and new (anchors+clusters+analysis)
+    response shapes into a uniform (anchors, clusters, analysis) triple.
+
+    Legacy shape is preserved so responses from the pre-themes prompt — and
+    test fixtures still returning bare arrays — keep parsing.
+    """
+    if isinstance(parsed, list):
+        return [], list(parsed), {}
+    if not isinstance(parsed, dict):
+        return [], [], {}
+    return (
+        parsed.get("anchors", []) or [],
+        parsed.get("clusters", []) or [],
+        parsed.get("analysis", {}) or {},
+    )
+
+
 def consolidate_feedback(
     feedback_list: list[Feedback],
     prompt_ref: str,
@@ -98,27 +175,22 @@ def consolidate_feedback(
     min_occurrences: int = 1,
     existing_issues: list[Issue] | None = None,
     directive: str | None = None,
-) -> IssueFile:
-    """Consolidate multiple feedback entries into issues via LLM clustering.
+    themes: list[str] | None = None,
+) -> ConsolidationResult:
+    """Consolidate feedback into issues and emit coverage analysis.
 
-    When existing_issues are provided, the LLM merges new feedback into
-    the existing issue structure — updating, splitting, or creating new
-    issues as needed rather than starting from scratch.
+    When `themes` is non-empty, cluster categories are constrained to those
+    themes (plus 'unassigned' for anchors that fit none). When empty or None,
+    the LLM proposes candidate themes — surfaced in `ConsolidationResult.analysis`
+    for the user to adopt authoritatively.
 
-    Args:
-        feedback_list: List of parsed feedback objects.
-        prompt_ref: Reference to the prompt file.
-        llm_client: LLM client for clustering.
-        min_occurrences: Minimum evidence count to keep an issue.
-        existing_issues: Previously identified issues to merge with.
-
-    Returns:
-        IssueFile with consolidated issues.
+    `existing_issues`, when provided, is re-fed as observations so the LLM
+    re-clusters the full corpus rather than appending.
     """
-    # 1. Collect all observations: existing evidence + new feedback
+    configured_themes = list(themes) if themes else []
+
     observations: list[tuple[str, str]] = []
 
-    # Include evidence from existing issues so the LLM can re-cluster everything
     if existing_issues:
         seen: set[tuple[str, str]] = set()
         for issue in existing_issues:
@@ -128,86 +200,125 @@ def consolidate_feedback(
                     seen.add(key)
                     observations.append(key)
 
-    # Add new feedback, splitting multi-issue entries
     for feedback in feedback_list:
         for entry in feedback.entries:
             for part in _split_feedback_entry(entry.text):
                 observations.append((feedback.source_file, part))
 
     if not observations:
-        return IssueFile(version="1.0", prompt_ref=prompt_ref, issues=[])
+        return ConsolidationResult(
+            issue_file=IssueFile(version="1.0", prompt_ref=prompt_ref, issues=[]),
+            analysis=Analysis(),
+        )
 
-    # 2. Build prompt listing every observation
-    lines = []
-    for idx, (source, text) in enumerate(observations):
-        lines.append(f"[{idx}] ({source}) {text}")
-
-    user_prompt = "\n".join(lines)
-
-    # 3. Ask the LLM to cluster
+    lines = [f"[{idx}] ({source}) {text}" for idx, (source, text) in enumerate(observations)]
+    themes_line = (
+        "THEMES: " + ", ".join(configured_themes)
+        if configured_themes
+        else "THEMES: (none configured — propose candidates)"
+    )
+    user_prompt = themes_line + "\n\nOBSERVATIONS:\n" + "\n".join(lines)
     if directive:
         user_prompt = (
             f"IMPORTANT — follow this guidance when clustering:\n{directive}\n\n"
             + user_prompt
         )
+
     raw_response = llm_client.generate(user_prompt, system=_CLUSTER_SYSTEM)
+    anchors_payload, clusters_payload, analysis_payload = _normalize_cluster_response(
+        _parse_llm_response(raw_response)
+    )
 
-    # Parse LLM response
-    try:
-        clusters = json.loads(raw_response)
-    except json.JSONDecodeError:
-        # Try to find JSON array in the response
-        clusters = []
-        start = raw_response.find("[")
-        end = raw_response.rfind("]") + 1
-        if start >= 0 and end > start:
-            try:
-                clusters = json.loads(raw_response[start:end])
-            except json.JSONDecodeError:
-                pass
+    # Index anchors by observation index so we can reuse their instance/confidence
+    # when building IssueEvidence — gives downstream evals access to the distilled
+    # anchor text in addition to the raw feedback.
+    anchor_by_index: dict[int, dict] = {}
+    for anchor in anchors_payload:
+        if not isinstance(anchor, dict):
+            continue
+        idx = anchor.get("index")
+        if isinstance(idx, int):
+            anchor_by_index[idx] = anchor
 
-    # 4. Build issues from clusters
+    valid_themes = set(configured_themes)
+    dropped_invented = 0
+
     total_sources = len({source for source, _ in observations})
     issues: list[Issue] = []
     issue_index = 1
 
-    for cluster in clusters:
-        label = cluster.get("label", f"issue-{issue_index}")
+    for cluster in clusters_payload:
+        if not isinstance(cluster, dict):
+            continue
+        # New shape: theme + failure_mode. Legacy shape: label only.
+        theme = cluster.get("theme")
+        failure_mode = cluster.get("failure_mode") or cluster.get("label") or f"issue-{issue_index}"
+        category = theme if theme else failure_mode
+
+        if configured_themes and theme and theme not in valid_themes and theme != "unassigned":
+            dropped_invented += 1
+            continue
+
         summary = cluster.get("summary", "")
-        evidence_indices = cluster.get("evidence_indices", [])
+        indices = cluster.get("anchor_indices") or cluster.get("evidence_indices") or []
 
-        # Build evidence list
         evidence: list[IssueEvidence] = []
-        for idx in evidence_indices:
-            if 0 <= idx < len(observations):
-                source, text = observations[idx]
-                evidence.append(IssueEvidence(source=source, feedback=text))
+        for idx in indices:
+            if not (isinstance(idx, int) and 0 <= idx < len(observations)):
+                continue
+            source, text = observations[idx]
+            anchor = anchor_by_index.get(idx, {})
+            instance = anchor.get("instance") if isinstance(anchor, dict) else None
+            confidence = anchor.get("confidence") if isinstance(anchor, dict) else None
+            if confidence not in ("high", "medium", "low"):
+                confidence = None
+            evidence.append(
+                IssueEvidence(
+                    source=source,
+                    feedback=text,
+                    instance=instance if isinstance(instance, str) and instance else None,
+                    confidence=confidence,
+                )
+            )
 
-        # Apply min_occurrences threshold based on unique sources, not
-        # raw evidence count. Multiple entries from the same .mb file
-        # count as 1 occurrence. Skip filtering entirely when there's
-        # only 1 source (first review — every cluster is a new discovery).
         unique_sources = len({ev.source for ev in evidence})
         if total_sources > 1 and unique_sources < min_occurrences:
             continue
 
-        # Compute severity from unique source count ratio
         severity = _determine_severity(unique_sources, total_sources)
 
-        issue = Issue(
-            id=_generate_issue_id(prompt_ref, issue_index),
-            category=label,
-            severity=severity,
-            summary=summary,
-            evidence=evidence,
+        # When themed: category IS the theme — it's the user-authoritative axis.
+        # The LLM's failure_mode is informational and lives in the summary.
+        if theme and failure_mode and failure_mode not in summary:
+            summary = f"[{failure_mode}] {summary}" if summary else failure_mode
+
+        issues.append(
+            Issue(
+                id=_generate_issue_id(prompt_ref, issue_index),
+                category=category,
+                severity=severity,
+                summary=summary,
+                evidence=evidence,
+            )
         )
-        issues.append(issue)
         issue_index += 1
 
-    return IssueFile(
-        version="1.0",
-        prompt_ref=prompt_ref,
-        issues=issues,
+    unassigned_count = sum(
+        1
+        for anchor in anchors_payload
+        if isinstance(anchor, dict) and not (anchor.get("themes") or [])
+    )
+
+    analysis = Analysis(
+        missing_themes=[t for t in analysis_payload.get("missing_themes", []) if isinstance(t, str)],
+        theme_adjustments=[a for a in analysis_payload.get("theme_adjustments", []) if isinstance(a, str)],
+        unassigned_anchor_count=unassigned_count,
+        dropped_invented_theme_count=dropped_invented,
+    )
+
+    return ConsolidationResult(
+        issue_file=IssueFile(version="1.0", prompt_ref=prompt_ref, issues=issues),
+        analysis=analysis,
     )
 
 
@@ -221,7 +332,12 @@ def load_issue_file(path: Path) -> IssueFile:
     issues = []
     for issue_data in data.get("issues", []):
         evidence = [
-            IssueEvidence(source=e["source"], feedback=e["feedback"])
+            IssueEvidence(
+                source=e["source"],
+                feedback=e["feedback"],
+                instance=e.get("instance"),
+                confidence=e.get("confidence"),
+            )
             for e in issue_data.get("evidence", [])
         ]
         issues.append(

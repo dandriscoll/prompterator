@@ -340,3 +340,10 @@ def test_criteria_prompt_documents_parens_convention():
     assert "Category (specific instance)" in _CRITERIA_SYSTEM
     assert "parenthesised body" in _CRITERIA_SYSTEM
     assert "probe" in _CRITERIA_SYSTEM.lower()
+
+
+def test_criteria_prompt_documents_theme_scoped_generalization():
+    """Tripwire: criteria prompt must constrain generalization to the issue's theme."""
+    assert "THEME" in _CRITERIA_SYSTEM
+    assert "GENERALIZATION IS CONSTRAINED" in _CRITERIA_SYSTEM
+    assert "other themes" in _CRITERIA_SYSTEM

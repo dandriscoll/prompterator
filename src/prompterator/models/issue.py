@@ -1,13 +1,28 @@
 """Issue models for consolidated feedback."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class IssueEvidence(BaseModel):
-    """Evidence supporting an issue from feedback sources."""
+    """Evidence supporting an issue from feedback sources.
+
+    `feedback` is the raw observation text; `instance` is the concrete
+    manifestation distilled from it (an anchor), preserving author intent
+    when the clustering step generalizes.
+    """
 
     source: str = Field(description="Source file path")
     feedback: str = Field(description="Relevant feedback text")
+    instance: str | None = Field(
+        default=None,
+        description="Concrete manifestation of the issue extracted from the feedback",
+    )
+    confidence: Literal["high", "medium", "low"] | None = Field(
+        default=None,
+        description="LLM confidence that this evidence supports the issue",
+    )
 
 
 class Issue(BaseModel):
@@ -39,7 +54,12 @@ class IssueFile(BaseModel):
                     "severity": issue.severity,
                     "summary": issue.summary,
                     "evidence": [
-                        {"source": e.source, "feedback": e.feedback}
+                        {
+                            "source": e.source,
+                            "feedback": e.feedback,
+                            **({"instance": e.instance} if e.instance else {}),
+                            **({"confidence": e.confidence} if e.confidence else {}),
+                        }
                         for e in issue.evidence
                     ],
                 }
