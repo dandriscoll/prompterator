@@ -128,7 +128,7 @@ def calibrate_cmd(
     click.echo(f"Prompt:         {prompt_ref}")
     click.echo(f"Evals:          {n_evals} from {evals_path.name}")
     click.echo(f"Feedback:       {n_feedback} .mb files, {n_entries} records")
-    click.echo(f"LLM calls:      {n_llm} (FAIL-labeled entries only)")
+    click.echo(f"LLM calls:      {n_llm} (every reviewed entry × evals with evidence)")
     click.echo()
 
     # --- Initialize LLM ---------------------------------------------------
@@ -149,8 +149,9 @@ def calibrate_cmd(
     from prompterator.runners.llm import debug_context
     debug_context("calibrate")
     click.echo(
-        "Running each eval against known-FAIL feedback to check whether\n"
-        "the eval detects the problems humans identified..."
+        "Running each eval against every reviewed entry to check whether\n"
+        "the eval agrees with the human labels (FAIL where cited as evidence,\n"
+        "PASS otherwise)..."
     )
     click.echo()
     progress = Progress(n_llm, label="Calibrating", quiet=quiet)
@@ -192,21 +193,30 @@ def calibrate_cmd(
                 click.echo(f"  {ex.source:<35} {ex.label:<10} {ex.eval_result:<10} {match_str}")
             click.echo("  " + "-" * (len(header) - 2))
 
-        pct = cal.accuracy * 100
+        n_correct = int(round(cal.accuracy * cal.num_examples))
         click.echo(
-            f"  Detection: {int(cal.accuracy * cal.num_examples)}/{cal.num_examples} ({pct:.1f}%)"
+            f"  Accuracy:  {n_correct}/{cal.num_examples} ({cal.accuracy * 100:.1f}%)"
+        )
+        click.echo(
+            f"  Precision: {cal.precision * 100:.1f}%  "
+            f"Recall: {cal.recall * 100:.1f}%  F1: {cal.f1:.2f}"
         )
         if cal.false_negatives > 0:
             click.echo(
                 f"  Missed: {cal.false_negatives}"
-                " (eval said PASS but human said FAIL — criteria too loose)"
+                " (eval said PASS but human said FAIL — criteria too narrow)"
+            )
+        if cal.false_positives > 0:
+            click.echo(
+                f"  False alarms: {cal.false_positives}"
+                " (eval said FAIL but human said PASS — criteria too broad)"
             )
 
         verdict_color = {"GOOD": "green", "WEAK": "yellow", "BAD": "red"}[cal.verdict]
         reason = {
-            "GOOD": "detection >= 80%",
-            "WEAK": "detection 60-79%",
-            "BAD": "detection < 60%",
+            "GOOD": "precision and recall >= 80%",
+            "WEAK": "precision or recall 60-79%",
+            "BAD": "precision or recall < 60%",
         }[cal.verdict]
         click.echo(
             f"  Verdict: {click.style(cal.verdict, fg=verdict_color, bold=True)} ({reason})"
@@ -290,31 +300,52 @@ def calibrate_cmd(
             if not eval_spec:
                 continue
 
-            # Build a directive from the missed examples
-            missed = [ex for ex in cal.examples if not ex.match]
-            missed_texts = []
-            for ex in missed:
-                # Find the feedback text for this example
-                for fb in feedback_list:
-                    mb_name = Path(fb.source_file).name
-                    for entry in fb.entries:
-                        src = Path(entry.file_ref).name if entry.file_ref else mb_name
-                        if src == ex.source and entry.text.strip():
-                            missed_texts.append(entry.text)
+            def _texts_for(predicate) -> list[str]:
+                out: list[str] = []
+                for ex in cal.examples:
+                    if ex.match or not predicate(ex):
+                        continue
+                    for fb in feedback_list:
+                        mb_name = Path(fb.source_file).name
+                        for entry in fb.entries:
+                            src = Path(entry.file_ref).name if entry.file_ref else mb_name
+                            if src == ex.source and entry.text.strip():
+                                out.append(entry.text)
+                return out
+
+            missed_texts = _texts_for(
+                lambda e: e.eval_result == "PASS" and e.label == "FAIL"
+            )
+            false_alarm_texts = _texts_for(
+                lambda e: e.eval_result == "FAIL" and e.label == "PASS"
+            )
 
             directive_parts = []
             if eval_spec.rubric and eval_spec.rubric.criteria:
+                summary = []
+                if cal.false_negatives:
+                    summary.append(f"missed {cal.false_negatives} known problem(s)")
+                if cal.false_positives:
+                    summary.append(f"false-alarmed on {cal.false_positives} clean output(s)")
                 directive_parts.append(
-                    f"The eval {cal.eval_id} missed {cal.false_negatives} known problem(s). "
+                    f"The eval {cal.eval_id} " + " and ".join(summary) + ". "
                     f"Current criterion: {eval_spec.rubric.criteria[0]}"
                 )
             if missed_texts:
                 directive_parts.append(
                     "Missed feedback: " + "; ".join(missed_texts[:3])
                 )
-            directive_parts.append(
-                "Broaden the criterion to catch these cases"
-            )
+            if false_alarm_texts:
+                directive_parts.append(
+                    "False-alarm feedback (clean outputs wrongly flagged): "
+                    + "; ".join(false_alarm_texts[:3])
+                )
+            if cal.false_negatives and cal.false_positives:
+                directive_parts.append("Rebalance the criterion")
+            elif cal.false_negatives:
+                directive_parts.append("Broaden the criterion to catch these cases")
+            else:
+                directive_parts.append("Narrow the criterion to avoid these false alarms")
             directive = ". ".join(directive_parts)
 
             click.echo(f"  {click.style(cal.eval_id, fg='cyan')}: {cal.verdict}")

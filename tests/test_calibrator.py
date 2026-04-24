@@ -124,48 +124,70 @@ def test_classify_labels_full_path_normalisation():
 # compute_metrics
 # ---------------------------------------------------------------------------
 
-def test_compute_metrics_perfect_detection():
-    """All known-bad outputs detected gives detection rate 1.0."""
+def test_compute_metrics_perfect():
+    """All TP and TN gives accuracy, precision, recall all 1.0."""
     examples = [
-        CalibrationExample(source="a.mb", label="FAIL", eval_result="FAIL", match=True),
-        CalibrationExample(source="b.mb", label="FAIL", eval_result="FAIL", match=True),
+        CalibrationExample(source="a.mb", label="FAIL", eval_result="FAIL", match=True),   # TP
+        CalibrationExample(source="b.mb", label="FAIL", eval_result="FAIL", match=True),   # TP
+        CalibrationExample(source="c.mb", label="PASS", eval_result="PASS", match=True),   # TN
     ]
-    detection, precision, recall, f1, fp, fn = compute_metrics(examples)
-    assert detection == 1.0
+    accuracy, precision, recall, f1, fp, fn = compute_metrics(examples)
+    assert accuracy == 1.0
+    assert precision == 1.0
     assert recall == 1.0
     assert fp == 0
     assert fn == 0
 
 
 def test_compute_metrics_with_misses():
-    """Missed detections lower the detection rate."""
+    """Missed detections lower recall but not precision."""
     examples = [
         CalibrationExample(source="a.mb", label="FAIL", eval_result="FAIL", match=True),   # TP
         CalibrationExample(source="b.mb", label="FAIL", eval_result="PASS", match=False),  # FN
     ]
-    detection, precision, recall, f1, fp, fn = compute_metrics(examples)
-    assert detection == 0.5  # 1/2
-    assert recall == 0.5
-    assert fp == 0  # no PASS labels, so no FP possible
+    accuracy, precision, recall, f1, fp, fn = compute_metrics(examples)
+    assert accuracy == 0.5  # (1+0) / 2
+    assert precision == 1.0  # no FP predictions
+    assert recall == 0.5  # 1/2 FAIL-labeled caught
+    assert fp == 0
     assert fn == 1
 
 
-def test_compute_metrics_all_missed():
-    """All detections missed gives 0.0."""
+def test_compute_metrics_with_false_positives():
+    """False alarms on clean outputs lower precision but not recall."""
     examples = [
-        CalibrationExample(source="a.mb", label="FAIL", eval_result="PASS", match=False),
-        CalibrationExample(source="b.mb", label="FAIL", eval_result="PASS", match=False),
+        CalibrationExample(source="a.mb", label="FAIL", eval_result="FAIL", match=True),   # TP
+        CalibrationExample(source="b.mb", label="PASS", eval_result="FAIL", match=False),  # FP
+        CalibrationExample(source="c.mb", label="PASS", eval_result="PASS", match=True),   # TN
     ]
-    detection, precision, recall, f1, fp, fn = compute_metrics(examples)
-    assert detection == 0.0
+    accuracy, precision, recall, f1, fp, fn = compute_metrics(examples)
+    assert accuracy == 2 / 3
+    assert precision == 0.5  # 1 TP / (1 TP + 1 FP)
+    assert recall == 1.0  # no FAIL missed
+    assert fp == 1
+    assert fn == 0
+
+
+def test_compute_metrics_all_missed():
+    """All FAIL labels missed gives recall 0."""
+    examples = [
+        CalibrationExample(source="a.mb", label="FAIL", eval_result="PASS", match=False),  # FN
+        CalibrationExample(source="b.mb", label="FAIL", eval_result="PASS", match=False),  # FN
+    ]
+    accuracy, precision, recall, f1, fp, fn = compute_metrics(examples)
+    assert accuracy == 0.0
+    assert recall == 0.0
+    assert precision == 1.0  # no FP predictions
     assert fn == 2
     assert fp == 0
 
 
 def test_compute_metrics_empty():
-    """Empty examples give zero detection rate."""
-    detection, precision, recall, f1, fp, fn = compute_metrics([])
-    assert detection == 0.0
+    """Empty examples give zero accuracy but default precision/recall to 1.0."""
+    accuracy, precision, recall, f1, fp, fn = compute_metrics([])
+    assert accuracy == 0.0
+    assert precision == 1.0
+    assert recall == 1.0
     assert fp == 0
     assert fn == 0
 
@@ -175,19 +197,21 @@ def test_compute_metrics_empty():
 # ---------------------------------------------------------------------------
 
 def test_verdict_good():
-    assert determine_verdict(0.80) == "GOOD"
-    assert determine_verdict(0.95) == "GOOD"
-    assert determine_verdict(1.0) == "GOOD"
+    assert determine_verdict(1.0, 1.0) == "GOOD"
+    assert determine_verdict(0.80, 0.80) == "GOOD"
+    assert determine_verdict(0.95, 0.85) == "GOOD"
 
 
 def test_verdict_weak():
-    assert determine_verdict(0.60) == "WEAK"
-    assert determine_verdict(0.79) == "WEAK"
+    assert determine_verdict(0.79, 0.80) == "WEAK"  # one side weak
+    assert determine_verdict(0.60, 0.60) == "WEAK"
+    assert determine_verdict(1.0, 0.70) == "WEAK"   # recall the bottleneck
 
 
 def test_verdict_bad():
-    assert determine_verdict(0.59) == "BAD"
-    assert determine_verdict(0.0) == "BAD"
+    assert determine_verdict(0.59, 1.0) == "BAD"    # precision the bottleneck
+    assert determine_verdict(1.0, 0.0) == "BAD"
+    assert determine_verdict(0.5, 0.5) == "BAD"
 
 
 # ---------------------------------------------------------------------------
@@ -232,12 +256,16 @@ def test_run_calibration_eval_non_rubric():
 # calibrate (end-to-end)
 # ---------------------------------------------------------------------------
 
+_FAIL_RESP = "CRITERION: X\nRESULT: FAIL\nREASON: Bad\nOVERALL: FAIL\nSCORE: 0.0"
+_PASS_RESP = "CRITERION: X\nRESULT: PASS\nREASON: OK\nOVERALL: PASS\nSCORE: 1.0"
+
+
 def test_calibrate_perfect_detection():
-    """All known-bad feedback correctly detected."""
+    """All FAIL entries caught, all PASS entries cleared."""
     feedback_list = [
         _make_feedback("neg1.mb", "adds conversational preamble"),
         _make_feedback("neg2.mb", "adds conversational preamble"),
-        _make_feedback("pos1.mb", "output starts directly with the list"),  # not in evidence, skipped
+        _make_feedback("pos1.mb", "output starts directly with the list"),
     ]
     issue_file = _make_issue_file(["neg1.mb", "neg2.mb"])
     eval_file = EvalFile(
@@ -245,29 +273,28 @@ def test_calibrate_perfect_detection():
         evals=[_make_eval()],
     )
 
-    # Only 2 LLM calls (neg1, neg2) — pos1 is skipped (no label)
-    llm = MockLLMClient(responses=[
-        "CRITERION: X\nRESULT: FAIL\nREASON: Bad\nOVERALL: FAIL\nSCORE: 0.0",
-        "CRITERION: X\nRESULT: FAIL\nREASON: Bad\nOVERALL: FAIL\nSCORE: 0.0",
-    ])
+    # neg1=FAIL(TP), neg2=FAIL(TP), pos1=PASS(TN)
+    llm = MockLLMClient(responses=[_FAIL_RESP, _FAIL_RESP, _PASS_RESP])
 
     results = calibrate(eval_file, feedback_list, issue_file, llm)
     assert len(results) == 1
     cal = results[0]
-    assert cal.num_examples == 2
+    assert cal.num_examples == 3
     assert cal.accuracy == 1.0
+    assert cal.precision == 1.0
+    assert cal.recall == 1.0
     assert cal.verdict == "GOOD"
     assert cal.false_positives == 0
     assert cal.false_negatives == 0
 
 
 def test_calibrate_with_false_negative():
-    """One negative example gets PASS from eval (missed detection)."""
+    """One FAIL entry missed by the eval; PASS entries still cleared."""
     feedback_list = [
         _make_feedback("neg1.mb", "adds conversational preamble"),
         _make_feedback("neg2.mb", "adds conversational preamble"),
-        _make_feedback("pos1.mb", "output starts directly with the list"),  # skipped
-        _make_feedback("pos2.mb", "output starts directly with the list"),  # skipped
+        _make_feedback("pos1.mb", "output starts directly with the list"),
+        _make_feedback("pos2.mb", "output starts directly with the list"),
     ]
     issue_file = _make_issue_file(["neg1.mb", "neg2.mb"])
     eval_file = EvalFile(
@@ -275,18 +302,42 @@ def test_calibrate_with_false_negative():
         evals=[_make_eval()],
     )
 
-    # Only 2 LLM calls: neg1=FAIL(correct), neg2=PASS(missed)
-    llm = MockLLMClient(responses=[
-        "CRITERION: X\nRESULT: FAIL\nREASON: Bad\nOVERALL: FAIL\nSCORE: 0.0",
-        "CRITERION: X\nRESULT: PASS\nREASON: OK\nOVERALL: PASS\nSCORE: 1.0",
-    ])
+    # neg1=FAIL(TP), neg2=PASS(FN), pos1=PASS(TN), pos2=PASS(TN)
+    llm = MockLLMClient(responses=[_FAIL_RESP, _PASS_RESP, _PASS_RESP, _PASS_RESP])
 
     results = calibrate(eval_file, feedback_list, issue_file, llm)
     cal = results[0]
-    assert cal.num_examples == 2  # only the 2 known-FAIL sources
-    assert cal.accuracy == 0.5  # 1/2 detected
+    assert cal.num_examples == 4
+    assert cal.accuracy == 0.75  # 3/4 correct
+    assert cal.recall == 0.5  # 1/2 FAIL caught
+    assert cal.precision == 1.0  # no FP
     assert cal.false_negatives == 1
     assert cal.false_positives == 0
+    assert cal.verdict == "BAD"  # recall drives verdict down
+
+
+def test_calibrate_with_false_positive():
+    """Eval fires on a clean output — false alarm lowers precision."""
+    feedback_list = [
+        _make_feedback("neg1.mb", "adds conversational preamble"),
+        _make_feedback("pos1.mb", "output starts directly with the list"),
+    ]
+    issue_file = _make_issue_file(["neg1.mb"])
+    eval_file = EvalFile(
+        prompt_ref="test.prompt.txt",
+        evals=[_make_eval()],
+    )
+
+    # neg1=FAIL(TP), pos1=FAIL(FP — false alarm on clean output)
+    llm = MockLLMClient(responses=[_FAIL_RESP, _FAIL_RESP])
+
+    results = calibrate(eval_file, feedback_list, issue_file, llm)
+    cal = results[0]
+    assert cal.num_examples == 2
+    assert cal.precision == 0.5  # 1 TP / (1 TP + 1 FP)
+    assert cal.recall == 1.0
+    assert cal.false_positives == 1
+    assert cal.false_negatives == 0
     assert cal.verdict == "BAD"
 
 
@@ -295,7 +346,7 @@ def test_calibrate_all_missed():
     feedback_list = [
         _make_feedback("neg1.mb", "adds conversational preamble"),
         _make_feedback("neg2.mb", "adds conversational preamble"),
-        _make_feedback("pos1.mb", "good"),  # skipped
+        _make_feedback("pos1.mb", "good"),
     ]
     issue_file = _make_issue_file(["neg1.mb", "neg2.mb"])
     eval_file = EvalFile(
@@ -303,21 +354,18 @@ def test_calibrate_all_missed():
         evals=[_make_eval()],
     )
 
-    # Both return PASS — both missed
-    llm = MockLLMClient(responses=[
-        "CRITERION: X\nRESULT: PASS\nREASON: x\nOVERALL: PASS\nSCORE: 1.0",
-        "CRITERION: X\nRESULT: PASS\nREASON: x\nOVERALL: PASS\nSCORE: 1.0",
-    ])
+    # neg1=PASS(FN), neg2=PASS(FN), pos1=PASS(TN)
+    llm = MockLLMClient(responses=[_PASS_RESP, _PASS_RESP, _PASS_RESP])
 
     results = calibrate(eval_file, feedback_list, issue_file, llm)
     cal = results[0]
-    assert cal.accuracy == 0.0
+    assert cal.recall == 0.0
     assert cal.verdict == "BAD"
     assert cal.false_negatives == 2
 
 
-def test_calibrate_skips_unassessed_feedback():
-    """Feedback not in issue evidence is skipped, not labeled PASS."""
+def test_calibrate_labels_uncited_entries_as_pass():
+    """Entries reviewed but not cited as evidence are labeled PASS (holistic review)."""
     feedback_list = [
         _make_feedback("neg1.mb", "adds conversational preamble"),
         _make_feedback("unrelated.mb", "different problem entirely"),
@@ -328,16 +376,16 @@ def test_calibrate_skips_unassessed_feedback():
         evals=[_make_eval()],
     )
 
-    # Only 1 LLM call — unrelated.mb is skipped
-    llm = MockLLMClient(responses=[
-        "CRITERION: X\nRESULT: FAIL\nREASON: x\nOVERALL: FAIL\nSCORE: 0.0",
-    ])
+    # neg1=FAIL(TP), unrelated=PASS(TN — reviewed, not cited for this issue)
+    llm = MockLLMClient(responses=[_FAIL_RESP, _PASS_RESP])
 
     results = calibrate(eval_file, feedback_list, issue_file, llm)
     cal = results[0]
-    assert cal.num_examples == 1  # only neg1
+    assert cal.num_examples == 2
     assert cal.accuracy == 1.0
-    assert len(llm.calls) == 1  # confirm only 1 LLM call
+    assert len(llm.calls) == 2
+    labels = sorted(ex.label for ex in cal.examples)
+    assert labels == ["FAIL", "PASS"]
 
 
 def test_calibrate_no_evidence_produces_no_results():
@@ -391,23 +439,24 @@ def test_calibrate_multiple_evals():
         ],
     )
 
-    # 2 LLM calls: 1 per eval (each eval has 1 evidence source)
+    # 6 LLM calls: 3 entries × 2 evals. Each eval labels its evidence source
+    # as FAIL and the other two as PASS (holistic review).
     llm = MockLLMClient(responses=[
-        # eval-clarity-01: f1=FAIL(correct)
-        "CRITERION: X\nRESULT: FAIL\nREASON: x\nOVERALL: FAIL\nSCORE: 0.0",
-        # eval-completeness-02: f2=FAIL(correct)
-        "CRITERION: X\nRESULT: FAIL\nREASON: x\nOVERALL: FAIL\nSCORE: 0.0",
+        # eval-clarity-01: f1=FAIL(TP), f2=PASS(TN), f3=PASS(TN)
+        _FAIL_RESP, _PASS_RESP, _PASS_RESP,
+        # eval-completeness-02: f1=PASS(TN), f2=FAIL(TP), f3=PASS(TN)
+        _PASS_RESP, _FAIL_RESP, _PASS_RESP,
     ])
 
     results = calibrate(eval_file, feedback_list, issue_file, llm)
     assert len(results) == 2
     assert results[0].eval_id == "eval-clarity-01"
     assert results[0].accuracy == 1.0
-    assert results[0].num_examples == 1
+    assert results[0].num_examples == 3
     assert results[1].eval_id == "eval-completeness-02"
     assert results[1].accuracy == 1.0
-    assert results[1].num_examples == 1
-    assert len(llm.calls) == 2  # one call per evidence source
+    assert results[1].num_examples == 3
+    assert len(llm.calls) == 6
 
 
 def test_calibrate_matches_semicolon_split_entries():
@@ -431,46 +480,47 @@ def test_calibrate_matches_semicolon_split_entries():
         evals=[_make_eval()],
     )
 
-    llm = MockLLMClient(responses=[
-        "CRITERION: X\nRESULT: FAIL\nREASON: Bad\nOVERALL: FAIL\nSCORE: 0.0",
-    ])
+    llm = MockLLMClient(responses=[_FAIL_RESP])
 
     results = calibrate(eval_file, feedback_list, issue_file, llm)
     assert len(results) == 1
     cal = results[0]
     assert cal.num_examples == 1
+    assert cal.examples[0].label == "FAIL"
     assert cal.accuracy == 1.0
     assert len(llm.calls) == 1
 
 
-def test_calibrate_only_matching_entries_from_multi_entry_file():
-    """Only entries whose text matches evidence are calibrated, not all entries from the file."""
-    # One .mb file with 3 entries, but only 1 is cited as evidence
+def test_calibrate_labels_entries_per_eval_independently():
+    """A file's entries each get FAIL or PASS per eval based on that eval's evidence."""
+    # One .mb file with 3 entries, only one cited as evidence for this eval.
+    # The other two are PASS labels — reviewed but not flagged for this issue.
     feedback_list = [
         Feedback(
             source_file="review.mb",
             prompt_ref="test.prompt.txt",
             entries=[
-                FeedbackEntry(text="adds conversational preamble"),       # in evidence
-                FeedbackEntry(text="grammar was incorrect"),      # NOT in evidence
-                FeedbackEntry(text="formatting looks off"),       # NOT in evidence
+                FeedbackEntry(text="adds conversational preamble"),   # evidence → FAIL
+                FeedbackEntry(text="grammar was incorrect"),          # PASS for this issue
+                FeedbackEntry(text="formatting looks off"),           # PASS for this issue
             ],
         ),
     ]
-    issue_file = _make_issue_file(["review.mb"])  # evidence text: "adds conversational preamble"
+    issue_file = _make_issue_file(["review.mb"])
     eval_file = EvalFile(
         prompt_ref="test.prompt.txt",
         evals=[_make_eval()],
     )
 
-    llm = MockLLMClient(responses=[
-        "CRITERION: X\nRESULT: FAIL\nREASON: Bad\nOVERALL: FAIL\nSCORE: 0.0",
-    ])
+    # entry1=FAIL(TP), entry2=PASS(TN), entry3=PASS(TN)
+    llm = MockLLMClient(responses=[_FAIL_RESP, _PASS_RESP, _PASS_RESP])
 
     results = calibrate(eval_file, feedback_list, issue_file, llm)
     cal = results[0]
-    assert cal.num_examples == 1  # only the matching entry, not all 3
-    assert len(llm.calls) == 1
+    assert cal.num_examples == 3
+    assert sorted(ex.label for ex in cal.examples) == ["FAIL", "PASS", "PASS"]
+    assert cal.accuracy == 1.0
+    assert len(llm.calls) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -551,14 +601,14 @@ def test_save_calibration_report(tmp_path):
 # Edge cases
 # ---------------------------------------------------------------------------
 
-def test_detection_rate_zero_when_all_missed():
-    """Detection rate is 0 when eval misses every known-bad example."""
+def test_recall_zero_when_all_missed():
+    """Recall is 0 when eval misses every known-bad example."""
     examples = [
         CalibrationExample(source="a.mb", label="FAIL", eval_result="PASS", match=False),
         CalibrationExample(source="b.mb", label="FAIL", eval_result="PASS", match=False),
     ]
-    detection, precision, recall, f1, fp, fn = compute_metrics(examples)
-    assert detection == 0.0
+    accuracy, precision, recall, f1, fp, fn = compute_metrics(examples)
+    assert accuracy == 0.0
     assert recall == 0.0
     assert f1 == 0.0
     assert fp == 0

@@ -12,7 +12,7 @@ from prompterator.models.calibration import (
     CalibrationResult,
 )
 from prompterator.models.eval import Eval, EvalFile
-from prompterator.models.feedback import Feedback
+from prompterator.models.feedback import Feedback, FeedbackEntry
 from prompterator.models.issue import IssueFile
 from prompterator.runners.llm import LLMClient
 
@@ -169,44 +169,49 @@ def compute_metrics(
 ) -> tuple[float, float, float, float, int, int]:
     """Compute calibration metrics from examples.
 
-    Only examples with known FAIL labels are used (from issue evidence).
-    The key metric is detection rate: what fraction of known-bad outputs
-    does the eval correctly flag?
+    Examples may carry either FAIL labels (entry cited as evidence for
+    this eval's issue) or PASS labels (entry reviewed but not cited —
+    i.e. the reviewer examined this output and did not flag the problem).
 
-      - TP = eval FAIL and label FAIL (correctly detected problem)
+      - TP = eval FAIL and label FAIL (correctly caught problem)
+      - FP = eval FAIL but label PASS (false alarm on clean output)
       - FN = eval PASS but label FAIL (missed problem)
+      - TN = eval PASS and label PASS (correctly cleared clean output)
 
-    Precision and F1 are not meaningful without PASS-labeled examples
-    and are set to 1.0 by convention.
+    Precision defaults to 1.0 when no eval FAIL predictions exist;
+    recall defaults to 1.0 when no FAIL labels exist.
 
     Returns:
-        Tuple of (detection_rate, precision, recall, f1, false_positives, false_negatives).
-        detection_rate is TP / (TP + FN).
-        false_positives is always 0 (no PASS labels to contradict).
+        Tuple of (accuracy, precision, recall, f1, false_positives, false_negatives).
     """
     tp = sum(1 for e in examples if e.eval_result == "FAIL" and e.label == "FAIL")
+    fp = sum(1 for e in examples if e.eval_result == "FAIL" and e.label == "PASS")
     fn = sum(1 for e in examples if e.eval_result == "PASS" and e.label == "FAIL")
+    tn = sum(1 for e in examples if e.eval_result == "PASS" and e.label == "PASS")
 
-    total = tp + fn
-    detection_rate = tp / total if total > 0 else 0.0
-
-    # Without PASS-labeled examples, precision is undefined (no FP possible)
-    precision = 1.0
-    recall = detection_rate
+    total = tp + fp + fn + tn
+    accuracy = (tp + tn) / total if total > 0 else 0.0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 1.0
     f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
 
-    return detection_rate, precision, recall, f1, 0, fn
+    return accuracy, precision, recall, f1, fp, fn
 
 
-def determine_verdict(detection_rate: float) -> str:
-    """Determine calibration verdict from detection rate.
+def determine_verdict(precision: float, recall: float) -> str:
+    """Determine calibration verdict from precision and recall.
+
+    Taking the worst of the two surfaces both failure modes:
+      - low recall  → criteria too narrow (eval misses real problems)
+      - low precision → criteria too broad (eval fires on clean outputs)
 
     Returns:
-        "GOOD" (>= 0.80), "WEAK" (>= 0.60), or "BAD" (< 0.60).
+        "GOOD" (both >= 0.80), "WEAK" (both >= 0.60), or "BAD" (either < 0.60).
     """
-    if detection_rate >= 0.80:
+    worst = min(precision, recall)
+    if worst >= 0.80:
         return "GOOD"
-    elif detection_rate >= 0.60:
+    elif worst >= 0.60:
         return "WEAK"
     else:
         return "BAD"
@@ -240,20 +245,24 @@ def estimate_calibration_calls(
     feedback_list: list[Feedback],
     issue_file: IssueFile,
 ) -> int:
-    """Estimate total LLM calls for calibration (evidence-matched entries only)."""
+    """Estimate total LLM calls for calibration.
+
+    For each eval with evidence, every reviewed entry becomes a calibration
+    example: entries matching the eval's evidence are FAIL labels, the rest
+    are implicit PASS labels (reviewed but uncited for this issue).
+    """
+    reviewed_per_eval = sum(
+        1
+        for fb in feedback_list
+        for entry in fb.entries
+        if entry.text.strip()
+    )
     total = 0
     for eval_spec in eval_file.evals:
         evidence_entries = classify_labels(feedback_list, issue_file, eval_spec)
         if not evidence_entries:
             continue
-        for fb in feedback_list:
-            mb_name = Path(fb.source_file).name
-            for entry in fb.entries:
-                if not entry.text.strip():
-                    continue
-                src_name = Path(entry.file_ref).name if entry.file_ref else mb_name
-                if _entry_matches_evidence(mb_name, src_name, entry.text, evidence_entries):
-                    total += 1
+        total += reviewed_per_eval
     return total
 
 
@@ -283,6 +292,20 @@ def calibrate(
     Returns:
         List of CalibrationResult, one per eval.
     """
+    # Flatten once — every non-empty entry across all feedback files counts
+    # as "reviewed" and produces a calibration example for each eval that
+    # has any evidence. Labels are per-eval: FAIL if cited as evidence for
+    # the eval's issue, PASS otherwise (holistic-review assumption).
+    reviewed: list[tuple[str, Path, FeedbackEntry, str]] = []
+    for fb in feedback_list:
+        mb_name = Path(fb.source_file).name
+        mb_dir = Path(fb.source_file).parent
+        for entry in fb.entries:
+            if not entry.text.strip():
+                continue
+            src_name = Path(entry.file_ref).name if entry.file_ref else mb_name
+            reviewed.append((mb_name, mb_dir, entry, src_name))
+
     results: list[CalibrationResult] = []
 
     for eval_spec in eval_file.evals:
@@ -292,49 +315,38 @@ def calibrate(
             continue
 
         examples: list[CalibrationExample] = []
-        for fb in feedback_list:
-            mb_name = Path(fb.source_file).name
-            mb_dir = Path(fb.source_file).parent
-
-            for entry in fb.entries:
-                if not entry.text.strip():
-                    continue
-
-                # Only include entries whose text matches evidence for this eval's issue.
-                # An .mb file may have entries about many categories — we only want the
-                # specific entry that was cited as evidence, not all entries from that file.
-                src_name = Path(entry.file_ref).name if entry.file_ref else mb_name
-                if not _entry_matches_evidence(mb_name, src_name, entry.text, evidence_entries):
-                    continue
+        for mb_name, mb_dir, entry, src_name in reviewed:
+            if _entry_matches_evidence(mb_name, src_name, entry.text, evidence_entries):
                 label = "FAIL"
+            else:
+                label = "PASS"
 
-                # Resolve input content from input_ref
-                input_content = _resolve_input_content(
-                    entry.input_ref, feedback_dir or mb_dir,
-                )
+            input_content = _resolve_input_content(
+                entry.input_ref, feedback_dir or mb_dir,
+            )
 
-                eval_passed = run_calibration_eval(
-                    eval_spec, entry.text, llm_client,
-                    input_content=input_content,
-                )
-                if progress:
-                    progress.tick(eval_spec.id)
-                eval_result = "PASS" if eval_passed else "FAIL"
+            eval_passed = run_calibration_eval(
+                eval_spec, entry.text, llm_client,
+                input_content=input_content,
+            )
+            if progress:
+                progress.tick(eval_spec.id)
+            eval_result = "PASS" if eval_passed else "FAIL"
 
-                examples.append(
-                    CalibrationExample(
-                        source=src_name,
-                        label=label,
-                        eval_result=eval_result,
-                        match=(label == eval_result),
-                    )
+            examples.append(
+                CalibrationExample(
+                    source=src_name,
+                    label=label,
+                    eval_result=eval_result,
+                    match=(label == eval_result),
                 )
+            )
 
         if not examples:
             continue
 
         accuracy, precision, recall, f1, fp, fn = compute_metrics(examples)
-        verdict = determine_verdict(accuracy)
+        verdict = determine_verdict(precision, recall)
 
         results.append(
             CalibrationResult(
@@ -356,19 +368,20 @@ def calibrate(
 
 _REVISE_CRITERIA_SYSTEM = """\
 You are an eval criteria editor. You will see an eval's rubric criteria and \
-examples where the eval MISSED a problem that a human identified. Your job \
-is to revise the criteria so they catch these missed problems.
+examples where the eval disagreed with a human reviewer. Your job is to \
+revise the criteria so they agree with the human.
 
-You will see:
-- The current criteria
+You may see:
 - MISSED (false negatives): the eval said PASS but the human said FAIL \
-— the criteria are too narrow or missing an important check
+— the criteria are too narrow or missing an important check. Broaden them.
+- FALSE ALARMS (false positives): the eval said FAIL but the human said PASS \
+— the criteria are too broad and flag clean outputs. Narrow them.
 
 Respond with ONLY a JSON array of revised criterion strings. \
 Keep the same number of criteria or fewer. Do not add markdown fences.
 
 Rules:
-- Make criteria BROADER to catch more real problems
+- Balance breadth: catch real problems without flagging clean outputs
 - If a criterion is fundamentally wrong, replace it entirely
 - Frame criteria as what the output must NOT do (absence of problem = PASS)
 - Each criterion should be one clear, testable sentence"""
@@ -394,8 +407,6 @@ def revise_eval_criteria(
     if eval_spec.type != "rubric" or not eval_spec.rubric:
         return None
 
-    # Collect missed examples (false negatives) with their feedback text
-    fn_examples = []
     # Build lookup: source basename -> feedback text
     fb_by_source: dict[str, list[str]] = {}
     for fb in feedback_list:
@@ -403,15 +414,20 @@ def revise_eval_criteria(
             src = Path(entry.file_ref).name if entry.file_ref else Path(fb.source_file).name
             fb_by_source.setdefault(src, []).append(entry.text)
 
+    fn_examples: list[str] = []  # eval PASS, label FAIL — criteria too narrow
+    fp_examples: list[str] = []  # eval FAIL, label PASS — criteria too broad
     for ex in calibration.examples:
         if ex.match:
             continue
+        texts = fb_by_source.get(ex.source, [])
+        text_block = "; ".join(texts) if texts else "(no feedback text available)"
+        line = f"- {ex.source}: {text_block}"
         if ex.eval_result == "PASS" and ex.label == "FAIL":
-            texts = fb_by_source.get(ex.source, [])
-            text_block = "; ".join(texts) if texts else "(no feedback text available)"
-            fn_examples.append(f"- {ex.source}: {text_block}")
+            fn_examples.append(line)
+        elif ex.eval_result == "FAIL" and ex.label == "PASS":
+            fp_examples.append(line)
 
-    if not fn_examples:
+    if not fn_examples and not fp_examples:
         return None
 
     criteria_text = "\n".join(f"- {c}" for c in eval_spec.rubric.criteria)
@@ -420,11 +436,17 @@ def revise_eval_criteria(
     if eval_spec.description:
         parts.append(f"DESCRIPTION: {eval_spec.description}")
     parts.append(f"\nCURRENT CRITERIA:\n{criteria_text}")
-    parts.append(
-        f"\nMISSED (eval said PASS, human said FAIL — "
-        f"criteria too narrow):\n" + "\n".join(fn_examples)
-    )
-    parts.append("\nRevise the criteria to catch these missed problems.")
+    if fn_examples:
+        parts.append(
+            f"\nMISSED (eval said PASS, human said FAIL — "
+            f"criteria too narrow):\n" + "\n".join(fn_examples)
+        )
+    if fp_examples:
+        parts.append(
+            f"\nFALSE ALARMS (eval said FAIL, human said PASS — "
+            f"criteria too broad):\n" + "\n".join(fp_examples)
+        )
+    parts.append("\nRevise the criteria to agree with the human labels.")
 
     import json
     raw = llm_client.generate("\n".join(parts), system=_REVISE_CRITERIA_SYSTEM)
