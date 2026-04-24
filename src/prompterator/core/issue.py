@@ -13,12 +13,27 @@ _CLUSTER_SYSTEM = (
     "You are a feedback analyst. You receive a numbered list of free-form observations "
     "about LLM-generated outputs and a THEMES list. Your job executes three passes "
     "in a single response:\n\n"
-    "  PASS 1 — ANCHORS. For each observation, emit an anchor: a concrete instance "
-    "of a problem with the output. Do not generalise here. Skip positive observations "
-    "(praise, things that are fine). Skip meta-observations about the feedback itself.\n"
-    "  PASS 2 — CLUSTERS. Group anchors by the real underlying problem they describe, "
-    "WITHIN the scope of a single theme. Do NOT cluster across themes. Prefer more "
-    "clusters over fewer — only group anchors that describe the SAME specific problem.\n"
+    "  PASS 1 — ANCHORS. Emit an anchor for EVERY observation (both problems and "
+    "affirmations — do NOT skip observations just because they are positive). Tag "
+    "each anchor with a `polarity`:\n"
+    "    - `negative` if the observation describes a PROBLEM with the output "
+    "(e.g. 'clothes distorted', 'adds conversational preamble', 'grammar is wrong').\n"
+    "    - `positive` if the observation AFFIRMS the output is correct on some "
+    "axis (e.g. 'no AI artifacts', 'face generated correctly', 'followed prompt', "
+    "'lora successfully applied', 'no body deformations').\n"
+    "  Positive observations are REQUIRED as anchors — they define the clean state "
+    "of an axis and pair with negative observations in the same cluster. A batch "
+    "of five observations like 'clothes distorted; no AI artifacts; face correct; "
+    "followed prompt; no body deformations' must produce FIVE anchors (1 negative, "
+    "4 positive), NOT one. Skip ONLY meta-observations about the feedback itself "
+    "(e.g. 'feedback is repetitive').\n"
+    "  PASS 2 — CLUSTERS. Group anchors by the underlying AXIS they describe, "
+    "WITHIN the scope of a single theme. Do NOT cluster across themes. An axis "
+    "groups observations about the same dimension of quality — e.g. a 'clothing "
+    "distortion' axis groups 'clothes appear ripped' (negative) with 'no clothing "
+    "distortions' (positive). Prefer more clusters over fewer — only group anchors "
+    "that describe the SAME specific axis. A cluster may contain only negative "
+    "anchors, only positive anchors, or a mix.\n"
     "  PASS 3 — COVERAGE ANALYSIS. Note anchors that fit no configured theme, and "
     "suggest (non-authoritative) adjustments if the current theme set consistently "
     "strains to fit the anchors.\n\n"
@@ -45,9 +60,10 @@ _CLUSTER_SYSTEM = (
     "[ ] checkbox markers with bullet-pointed priority sections'.\n\n"
     "GENERALIZATION IS CONSTRAINED. Each cluster's `summary` generalises only across "
     "its own anchors within its theme. The summary must be explainable from the "
-    "anchors it groups.\n\n"
+    "anchors it groups, and should describe the axis (not just the negatives).\n\n"
     "Output ONLY a single JSON object with these top-level keys:\n"
     '  "anchors": list of {"index": int, "instance": str, '
+    '"polarity": "negative"|"positive", '
     '"confidence": "high"|"medium"|"low", "themes": list of theme names the anchor '
     "supports (or [] if none)}.\n"
     '  "clusters": list of {"theme": one of THEMES or "unassigned" (or a proposed '
@@ -189,21 +205,31 @@ def consolidate_feedback(
     """
     configured_themes = list(themes) if themes else []
 
+    # New feedback is the ground-truth observation stream — each reviewed entry
+    # contributes one observation per fragment, duplicates preserved so the LLM
+    # sees how often each problem was seen. Existing evidence is re-fed only
+    # for (source, text) pairs the new feedback doesn't already cover; that way
+    # prior clusters stay visible without double-counting observations that
+    # appear in both.
     observations: list[tuple[str, str]] = []
-
-    if existing_issues:
-        seen: set[tuple[str, str]] = set()
-        for issue in existing_issues:
-            for ev in issue.evidence:
-                key = (ev.source, ev.feedback)
-                if key not in seen:
-                    seen.add(key)
-                    observations.append(key)
+    new_keys: set[tuple[str, str]] = set()
 
     for feedback in feedback_list:
         for entry in feedback.entries:
             for part in _split_feedback_entry(entry.text):
-                observations.append((feedback.source_file, part))
+                key = (feedback.source_file, part)
+                observations.append(key)
+                new_keys.add(key)
+
+    if existing_issues:
+        seen_from_existing: set[tuple[str, str]] = set()
+        for issue in existing_issues:
+            for ev in issue.evidence:
+                key = (ev.source, ev.feedback)
+                if key in new_keys or key in seen_from_existing:
+                    continue
+                seen_from_existing.add(key)
+                observations.append(key)
 
     if not observations:
         return ConsolidationResult(
@@ -272,20 +298,30 @@ def consolidate_feedback(
             confidence = anchor.get("confidence") if isinstance(anchor, dict) else None
             if confidence not in ("high", "medium", "low"):
                 confidence = None
+            polarity = anchor.get("polarity") if isinstance(anchor, dict) else None
+            if polarity not in ("negative", "positive"):
+                polarity = "negative"  # backstop: pre-polarity responses
             evidence.append(
                 IssueEvidence(
                     source=source,
                     feedback=text,
+                    polarity=polarity,
                     instance=instance if isinstance(instance, str) and instance else None,
                     confidence=confidence,
                 )
             )
 
-        unique_sources = len({ev.source for ev in evidence})
-        if total_sources > 1 and unique_sources < min_occurrences:
+        # An axis without any negative evidence has nothing to fix — skip it.
+        # (The positive anchors still inform the critic via other paths, but
+        # we don't emit a "pure-positive" issue.)
+        negative_sources = {ev.source for ev in evidence if ev.polarity == "negative"}
+        if not negative_sources:
             continue
 
-        severity = _determine_severity(unique_sources, total_sources)
+        if total_sources > 1 and len(negative_sources) < min_occurrences:
+            continue
+
+        severity = _determine_severity(len(negative_sources), total_sources)
 
         # When themed: category IS the theme — it's the user-authoritative axis.
         # The LLM's failure_mode is informational and lives in the summary.
@@ -335,6 +371,7 @@ def load_issue_file(path: Path) -> IssueFile:
             IssueEvidence(
                 source=e["source"],
                 feedback=e["feedback"],
+                polarity=e.get("polarity", "negative"),
                 instance=e.get("instance"),
                 confidence=e.get("confidence"),
             )

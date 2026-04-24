@@ -12,6 +12,7 @@ from prompterator.core.issue import (
     consolidate_feedback,
 )
 from prompterator.models.feedback import Feedback, FeedbackEntry
+from prompterator.models.issue import Issue, IssueEvidence
 
 
 def test_consolidate_basic():
@@ -383,6 +384,299 @@ def test_feedback_themes_round_trip():
     rebuilt = Config(feedback=FeedbackConfig(**yaml_dict["feedback"]))
     assert rebuilt.feedback.themes == ["tone", "structure"]
 
+
+# ---------------------------------------------------------------------------
+# Polarity: positive observations cluster to the same axis as negatives
+# ---------------------------------------------------------------------------
+
+def test_cluster_prompt_documents_polarity():
+    """Tripwire: clustering prompt must describe both polarities."""
+    assert "polarity" in _CLUSTER_SYSTEM
+    assert "negative" in _CLUSTER_SYSTEM and "positive" in _CLUSTER_SYSTEM
+    # Must no longer instruct the LLM to skip positives.
+    assert "Skip positive observations" not in _CLUSTER_SYSTEM
+
+
+def test_positive_anchors_become_positive_evidence():
+    """An anchor tagged polarity=positive lands in IssueEvidence with polarity=positive."""
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="clothes distorted (appear ripped)")],
+        ),
+        Feedback(
+            source_file="r2.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="no clothing distortions")],
+        ),
+    ]
+    response = _themed_response(
+        anchors=[
+            {"index": 0, "instance": "clothes ripped", "polarity": "negative",
+             "confidence": "high", "themes": ["clothing"]},
+            {"index": 1, "instance": "no clothing distortions", "polarity": "positive",
+             "confidence": "high", "themes": ["clothing"]},
+        ],
+        clusters=[
+            {"theme": "clothing", "failure_mode": "distortion",
+             "summary": "clothing distortion axis", "anchor_indices": [0, 1]}
+        ],
+    )
+    mock = MockLLMClient(responses=[response])
+
+    result = consolidate_feedback(
+        feedback_list, "test.prompt.txt", mock, themes=["clothing"]
+    )
+    assert len(result.issues) == 1
+    polarities = sorted(ev.polarity for ev in result.issues[0].evidence)
+    assert polarities == ["negative", "positive"]
+
+
+def test_pure_positive_cluster_is_dropped():
+    """A cluster whose anchors are all positive has no problem to fix → no issue."""
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="face generated correctly")],
+        ),
+    ]
+    response = _themed_response(
+        anchors=[
+            {"index": 0, "instance": "face correct", "polarity": "positive",
+             "confidence": "high", "themes": ["face-quality"]},
+        ],
+        clusters=[
+            {"theme": "face-quality", "failure_mode": "n/a",
+             "summary": "face quality affirmed", "anchor_indices": [0]}
+        ],
+    )
+    mock = MockLLMClient(responses=[response])
+    result = consolidate_feedback(
+        feedback_list, "test.prompt.txt", mock, themes=["face-quality"]
+    )
+    assert result.issues == []
+
+
+def test_severity_counts_only_negative_sources():
+    """Severity uses negative-evidence sources, not total evidence count."""
+    # 2 sources: 1 has a negative observation, 1 has a positive one.
+    # Severity should reflect 1/2 = medium, not 2/2 = high.
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="clothes distorted")],
+        ),
+        Feedback(
+            source_file="r2.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="no clothing distortions")],
+        ),
+    ]
+    response = _themed_response(
+        anchors=[
+            {"index": 0, "instance": "clothes distorted", "polarity": "negative",
+             "confidence": "high", "themes": ["clothing"]},
+            {"index": 1, "instance": "clean", "polarity": "positive",
+             "confidence": "high", "themes": ["clothing"]},
+        ],
+        clusters=[
+            {"theme": "clothing", "failure_mode": "distortion",
+             "summary": "distortion axis", "anchor_indices": [0, 1]}
+        ],
+    )
+    mock = MockLLMClient(responses=[response])
+    result = consolidate_feedback(
+        feedback_list, "test.prompt.txt", mock, themes=["clothing"]
+    )
+    assert result.issues[0].severity == "medium"  # 1 negative / 2 total → medium
+
+
+def test_missing_polarity_defaults_to_negative():
+    """Anchors without polarity are treated as negative (legacy-response backstop)."""
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="clothes distorted")],
+        ),
+    ]
+    response = _themed_response(
+        anchors=[
+            # No polarity field.
+            {"index": 0, "instance": "clothes distorted", "confidence": "high",
+             "themes": ["clothing"]},
+        ],
+        clusters=[
+            {"theme": "clothing", "failure_mode": "distortion",
+             "summary": "distortion axis", "anchor_indices": [0]}
+        ],
+    )
+    mock = MockLLMClient(responses=[response])
+    result = consolidate_feedback(
+        feedback_list, "test.prompt.txt", mock, themes=["clothing"]
+    )
+    assert result.issues[0].evidence[0].polarity == "negative"
+
+
+# ---------------------------------------------------------------------------
+# Over-counting: repeat runs with existing_issues must not duplicate evidence
+# ---------------------------------------------------------------------------
+
+def test_duplicate_fragments_in_new_feedback_kept():
+    """Two entries in the same .mb file with the same fragment produce two observations."""
+    # Entries 2 and 5 both contain "prompt not followed" — severity accounting
+    # needs both to surface as separate observations so the LLM can count
+    # how often the problem happened.
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[
+                FeedbackEntry(text="prompt not followed"),
+                FeedbackEntry(text="prompt not followed"),
+            ],
+        ),
+    ]
+    captured: list[str] = []
+
+    class _CaptureLLM(MockLLMClient):
+        def generate(self, prompt, **kwargs):
+            captured.append(prompt)
+            return super().generate(prompt, **kwargs)
+
+    response = _themed_response(
+        anchors=[
+            {"index": 0, "instance": "prompt not followed", "polarity": "negative",
+             "confidence": "high", "themes": ["prompt"]},
+            {"index": 1, "instance": "prompt not followed", "polarity": "negative",
+             "confidence": "high", "themes": ["prompt"]},
+        ],
+        clusters=[
+            {"theme": "prompt", "failure_mode": "not-followed",
+             "summary": "prompt not followed", "anchor_indices": [0, 1]}
+        ],
+    )
+    mock = _CaptureLLM(responses=[response])
+    consolidate_feedback(feedback_list, "test.prompt.txt", mock, themes=["prompt"])
+
+    obs_lines = [
+        line for line in captured[0].splitlines()
+        if "prompt not followed" in line and line.startswith("[")
+    ]
+    assert len(obs_lines) == 2, obs_lines
+
+
+def test_existing_and_new_observations_deduped():
+    """When existing issues' evidence overlaps new feedback, observations aren't doubled."""
+    # Simulate a second `prompterator issues` run: existing evidence lists the
+    # same entry text that the fresh feedback also contains.
+    existing = [
+        Issue(
+            id="issue-test-01",
+            category="clothing",
+            severity="high",
+            summary="clothing distorted",
+            evidence=[
+                IssueEvidence(
+                    source="r1.mb", feedback="clothes distorted", polarity="negative"
+                ),
+            ],
+        ),
+    ]
+    feedback_list = [
+        Feedback(
+            source_file="r1.mb",
+            prompt_ref="test.prompt.txt",
+            entries=[FeedbackEntry(text="clothes distorted")],
+        ),
+    ]
+    # Capture the prompt the LLM sees to verify the observation appears only once.
+    captured_prompts: list[str] = []
+
+    class _CaptureLLM(MockLLMClient):
+        def generate(self, prompt, **kwargs):
+            captured_prompts.append(prompt)
+            return super().generate(prompt, **kwargs)
+
+    response = _themed_response(
+        anchors=[
+            {"index": 0, "instance": "clothes distorted", "polarity": "negative",
+             "confidence": "high", "themes": ["clothing"]},
+        ],
+        clusters=[
+            {"theme": "clothing", "failure_mode": "distortion",
+             "summary": "distortion axis", "anchor_indices": [0]}
+        ],
+    )
+    mock = _CaptureLLM(responses=[response])
+    result = consolidate_feedback(
+        feedback_list, "test.prompt.txt", mock,
+        existing_issues=existing, themes=["clothing"],
+    )
+
+    # Exactly one observation for (r1.mb, "clothes distorted") — not two.
+    assert captured_prompts
+    obs_lines = [
+        line for line in captured_prompts[0].splitlines()
+        if "clothes distorted" in line and line.startswith("[")
+    ]
+    assert len(obs_lines) == 1, obs_lines
+    # And the resulting issue has a single evidence record, not two.
+    assert len(result.issues) == 1
+    assert len(result.issues[0].evidence) == 1
+
+
+def test_issue_evidence_round_trips_polarity(tmp_path):
+    """Polarity survives save + reload; default is negative when absent from disk."""
+    from prompterator.core.issue import save_issue_file, load_issue_file
+    from prompterator.models.issue import Issue, IssueEvidence, IssueFile
+
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(
+                id="issue-test-01",
+                category="clothing",
+                severity="high",
+                summary="distortion",
+                evidence=[
+                    IssueEvidence(
+                        source="r1.mb", feedback="clothes distorted", polarity="negative"
+                    ),
+                    IssueEvidence(
+                        source="r2.mb", feedback="no distortions", polarity="positive"
+                    ),
+                ],
+            ),
+        ],
+    )
+    path = tmp_path / "test.issue.yaml"
+    save_issue_file(issue_file, path)
+
+    # Hand-written yaml without polarity still loads, defaults to negative.
+    legacy = tmp_path / "legacy.issue.yaml"
+    legacy.write_text(
+        "version: '1.0'\n"
+        "prompt_ref: test.prompt.txt\n"
+        "issues:\n"
+        "- id: issue-test-01\n"
+        "  category: clothing\n"
+        "  severity: high\n"
+        "  summary: legacy\n"
+        "  evidence:\n"
+        "  - source: r1.mb\n"
+        "    feedback: old format\n"
+    )
+
+    loaded = load_issue_file(path)
+    assert loaded.issues[0].evidence[0].polarity == "negative"
+    assert loaded.issues[0].evidence[1].polarity == "positive"
+
+    legacy_loaded = load_issue_file(legacy)
+    assert legacy_loaded.issues[0].evidence[0].polarity == "negative"
 
 
 def test_issue_evidence_round_trips_instance_and_confidence(tmp_path):

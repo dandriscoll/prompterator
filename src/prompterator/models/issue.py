@@ -10,11 +10,20 @@ class IssueEvidence(BaseModel):
 
     `feedback` is the raw observation text; `instance` is the concrete
     manifestation distilled from it (an anchor), preserving author intent
-    when the clustering step generalizes.
+    when the clustering step generalizes. `polarity` distinguishes
+    negative evidence (a problem instance on this axis) from positive
+    evidence (an affirmation that the output is clean on this axis).
+    Both are clustered to the same axis so the issue describes the axis,
+    not just the failures.
     """
 
     source: str = Field(description="Source file path")
     feedback: str = Field(description="Relevant feedback text")
+    polarity: Literal["negative", "positive"] = Field(
+        default="negative",
+        description="Whether this evidence is a problem instance (negative) "
+                    "or an affirmation of correctness (positive) on this axis",
+    )
     instance: str | None = Field(
         default=None,
         description="Concrete manifestation of the issue extracted from the feedback",
@@ -57,6 +66,7 @@ class IssueFile(BaseModel):
                         {
                             "source": e.source,
                             "feedback": e.feedback,
+                            "polarity": e.polarity,
                             **({"instance": e.instance} if e.instance else {}),
                             **({"confidence": e.confidence} if e.confidence else {}),
                         }

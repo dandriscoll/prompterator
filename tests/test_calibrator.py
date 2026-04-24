@@ -364,6 +364,85 @@ def test_calibrate_all_missed():
     assert cal.false_negatives == 2
 
 
+def test_calibrate_ignores_positive_evidence_for_fail_matching():
+    """Positive-polarity evidence records do not cause entries to be labeled FAIL."""
+    # Evidence for the issue: one negative ("bad"), one positive ("clean").
+    # Only the negative entry should be labeled FAIL.
+    feedback_list = [
+        _make_feedback("bad.mb", "adds conversational preamble"),
+        _make_feedback("clean.mb", "output starts directly with the list"),
+    ]
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(
+                id="issue-test-01",
+                category="preamble",
+                severity="high",
+                summary="preamble axis",
+                evidence=[
+                    IssueEvidence(
+                        source="bad.mb",
+                        feedback="adds conversational preamble",
+                        polarity="negative",
+                    ),
+                    IssueEvidence(
+                        source="clean.mb",
+                        feedback="output starts directly with the list",
+                        polarity="positive",
+                    ),
+                ],
+            ),
+        ],
+    )
+    eval_file = EvalFile(
+        prompt_ref="test.prompt.txt",
+        evals=[_make_eval()],
+    )
+
+    # bad=FAIL(TP), clean=PASS(TN)
+    llm = MockLLMClient(responses=[_FAIL_RESP, _PASS_RESP])
+
+    results = calibrate(eval_file, feedback_list, issue_file, llm)
+    cal = results[0]
+    labels = {ex.source: ex.label for ex in cal.examples}
+    assert labels == {"bad.mb": "FAIL", "clean.mb": "PASS"}
+    assert cal.accuracy == 1.0
+
+
+def test_calibrate_skips_eval_with_only_positive_evidence():
+    """An eval whose linked issue has only positive evidence produces no calibration."""
+    feedback_list = [
+        _make_feedback("f1.mb", "output starts directly with the list"),
+    ]
+    issue_file = IssueFile(
+        prompt_ref="test.prompt.txt",
+        issues=[
+            Issue(
+                id="issue-test-01",
+                category="preamble",
+                severity="high",
+                summary="preamble axis — all positive so far",
+                evidence=[
+                    IssueEvidence(
+                        source="f1.mb",
+                        feedback="output starts directly with the list",
+                        polarity="positive",
+                    ),
+                ],
+            ),
+        ],
+    )
+    eval_file = EvalFile(
+        prompt_ref="test.prompt.txt",
+        evals=[_make_eval()],
+    )
+    llm = MockLLMClient()
+    results = calibrate(eval_file, feedback_list, issue_file, llm)
+    assert results == []
+    assert llm.calls == []
+
+
 def test_calibrate_labels_uncited_entries_as_pass():
     """Entries reviewed but not cited as evidence are labeled PASS (holistic review)."""
     feedback_list = [

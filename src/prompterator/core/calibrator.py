@@ -45,32 +45,48 @@ def classify_labels(
     issue_file: IssueFile,
     eval_spec: Eval,
 ) -> set[tuple[str, str]]:
-    """Identify specific feedback entries that are evidence for an eval's issue.
+    """Identify negative-polarity evidence for an eval's issue.
 
-    Matches at the entry level: an entry is labeled FAIL only if its text
-    appears in the linked issue's evidence. Other entries from the same
-    .mb file but about different categories are not included.
-
-    Args:
-        feedback_list: All parsed feedback objects for the prompt.
-        eval_spec: The eval to classify against.
-        issue_file: The issue file containing evidence mappings.
-
-    Returns:
-        Set of (source_basename, feedback_text) tuples that are known FAIL.
-        Entries not in the set were not assessed and should be skipped.
+    Backwards-compatible: returns only the set of (source_basename,
+    feedback_text) tuples whose evidence polarity is `negative`. Positive
+    evidence is available via ``classify_labels_by_polarity``.
     """
-    # Collect evidence texts keyed by source basename
-    evidence_entries: set[tuple[str, str]] = set()
+    negative, _positive = classify_labels_by_polarity(
+        feedback_list, issue_file, eval_spec,
+    )
+    return negative
+
+
+def classify_labels_by_polarity(
+    feedback_list: list[Feedback],
+    issue_file: IssueFile,
+    eval_spec: Eval,
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """Return (negative_evidence, positive_evidence) for an eval's issue.
+
+    Negative evidence = problem instances on the issue's axis → entries
+    matching these fragments are labeled FAIL.
+    Positive evidence = affirmations that the output is clean on the axis →
+    entries matching these fragments are labeled PASS with high confidence.
+
+    The `feedback_list` parameter is currently unused but retained for
+    callers that want to filter by file presence later.
+    """
+    negative: set[tuple[str, str]] = set()
+    positive: set[tuple[str, str]] = set()
 
     if eval_spec.issue_ref:
         for issue in issue_file.issues:
             if issue.id == eval_spec.issue_ref:
                 for ev in issue.evidence:
-                    evidence_entries.add((Path(ev.source).name, ev.feedback))
+                    key = (Path(ev.source).name, ev.feedback)
+                    if ev.polarity == "positive":
+                        positive.add(key)
+                    else:
+                        negative.add(key)
                 break
 
-    return evidence_entries
+    return negative, positive
 
 
 def _build_output_rubric_prompt(
@@ -259,8 +275,10 @@ def estimate_calibration_calls(
     )
     total = 0
     for eval_spec in eval_file.evals:
-        evidence_entries = classify_labels(feedback_list, issue_file, eval_spec)
-        if not evidence_entries:
+        negative_evidence, _ = classify_labels_by_polarity(
+            feedback_list, issue_file, eval_spec,
+        )
+        if not negative_evidence:
             continue
         total += reviewed_per_eval
     return total
@@ -309,16 +327,25 @@ def calibrate(
     results: list[CalibrationResult] = []
 
     for eval_spec in eval_file.evals:
-        evidence_entries = classify_labels(feedback_list, issue_file, eval_spec)
+        negative_evidence, positive_evidence = classify_labels_by_polarity(
+            feedback_list, issue_file, eval_spec,
+        )
 
-        if not evidence_entries:
+        # Need at least one negative evidence record to have a FAIL class
+        # to calibrate against. An eval whose linked issue has only positive
+        # evidence can't produce a detection rate.
+        if not negative_evidence:
             continue
 
         examples: list[CalibrationExample] = []
         for mb_name, mb_dir, entry, src_name in reviewed:
-            if _entry_matches_evidence(mb_name, src_name, entry.text, evidence_entries):
+            if _entry_matches_evidence(mb_name, src_name, entry.text, negative_evidence):
                 label = "FAIL"
             else:
+                # PASS whether or not the entry matches positive evidence:
+                # explicit positive evidence just makes the label auditable.
+                # Entries matching neither polarity are implicit PASS under
+                # the holistic-review assumption.
                 label = "PASS"
 
             input_content = _resolve_input_content(
