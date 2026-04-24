@@ -109,6 +109,13 @@ from prompterator.runners.llm import LLMClient, LLMError
     help="Focus on improving a specific eval ID (others must not regress)",
 )
 @click.option(
+    "--directive",
+    "-d",
+    type=str,
+    default=None,
+    help="Guidance for the editor LLM each iteration (falls back to directives config)",
+)
+@click.option(
     "--quiet",
     "-q",
     is_flag=True,
@@ -130,6 +137,7 @@ def tune_cmd(
     counterpart: Path | None,
     dialog_turns: int,
     focus: str | None,
+    directive: str | None,
     quiet: bool,
 ) -> None:
     """Run the full tuning loop: improve → test → improve iteratively.
@@ -139,6 +147,9 @@ def tune_cmd(
     """
     config = load_config()
     base_dir = get_config_base_dir()
+
+    if directive is None:
+        directive = config.resolve_directive("improve")
 
     try:
         prompt, evals_path, eval_file = resolve_prompt_and_evals(
@@ -328,6 +339,7 @@ def tune_cmd(
             quiet=quiet,
             focus_eval=focus,
             aggressive=aggressive,
+            directive=directive,
         )
     except LLMError as e:
         _clear_status()

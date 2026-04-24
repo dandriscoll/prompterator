@@ -183,6 +183,32 @@ class WorkflowConfig(BaseModel):
     )
 
 
+class DirectivesConfig(BaseModel):
+    """Persistent directives applied when the CLI does not pass --directive.
+
+    `default` is used by any command that accepts --directive if no
+    command-specific value is set; the per-command fields override it for
+    that command. CLI --directive always wins over both.
+    """
+
+    default: str | None = Field(
+        default=None,
+        description="Directive applied to every command that accepts --directive",
+    )
+    issues: str | None = Field(
+        default=None,
+        description="Directive for `prompterator issues` (overrides default)",
+    )
+    evals: str | None = Field(
+        default=None,
+        description="Directive for `prompterator evals` (overrides default)",
+    )
+    improve: str | None = Field(
+        default=None,
+        description="Directive for `prompterator improve` and `tune` (overrides default)",
+    )
+
+
 class Config(BaseModel):
     """Root configuration for prompterator."""
 
@@ -199,6 +225,7 @@ class Config(BaseModel):
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
     naming: NamingConfig = Field(default_factory=NamingConfig)
     workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
+    directives: DirectivesConfig = Field(default_factory=DirectivesConfig)
 
     @model_validator(mode="after")
     def _validate_stack_references(self) -> "Config":
@@ -235,6 +262,19 @@ class Config(BaseModel):
         if not path.is_absolute():
             path = base / path
         return path
+
+    def resolve_directive(
+        self, command: Literal["issues", "evals", "improve"],
+    ) -> str | None:
+        """Return the configured directive for a command, falling back to default.
+
+        Intended to be called when CLI --directive is None — so the order of
+        precedence is CLI > directives.<command> > directives.default > None.
+        """
+        command_specific = getattr(self.directives, command, None)
+        if command_specific:
+            return command_specific
+        return self.directives.default
 
     @staticmethod
     def _role_to_dict(role: LLMRoleConfig) -> dict:
@@ -297,4 +337,17 @@ class Config(BaseModel):
             "workflow": {
                 "git_mode": self.workflow.git_mode,
             },
+            **(
+                {"directives": {
+                    k: v for k, v in {
+                        "default": self.directives.default,
+                        "issues": self.directives.issues,
+                        "evals": self.directives.evals,
+                        "improve": self.directives.improve,
+                    }.items() if v is not None
+                }}
+                if any((self.directives.default, self.directives.issues,
+                        self.directives.evals, self.directives.improve))
+                else {}
+            ),
         }

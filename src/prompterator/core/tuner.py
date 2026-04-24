@@ -138,6 +138,7 @@ def run_tuning_loop(
     quiet: bool = False,
     focus_eval: str | None = None,
     aggressive: bool = False,
+    directive: str | None = None,
 ) -> TuneReport:
     """Run the full tuning loop.
 
@@ -235,6 +236,7 @@ def run_tuning_loop(
                 stall_count=stall_count,
                 eval_file=eval_file,
                 focus_eval=focus_eval,
+                directive=directive,
             )
             if improved_text != current_text:
                 break

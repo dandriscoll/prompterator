@@ -81,6 +81,9 @@ def improve_cmd(
     config = load_config()
     base_dir = get_config_base_dir()
 
+    if directive is None:
+        directive = config.resolve_directive("improve")
+
     # --- Resolve prompt and issues ----------------------------------------
     from prompterator.commands.resolve import resolve_prompt
     if prompt is None:

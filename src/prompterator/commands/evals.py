@@ -39,6 +39,9 @@ def evals_cmd(directory: Path | None, output: Path | None, dry_run: bool, direct
     config = load_config()
     base_dir = get_config_base_dir()
 
+    if directive is None:
+        directive = config.resolve_directive("evals")
+
     if directory is None:
         directory = config.get_dir("issues", base_dir)
 
