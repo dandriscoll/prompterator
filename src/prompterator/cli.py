@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from prompterator.commands.annotate import annotate_cmd
 from prompterator.commands.calibrate import calibrate_cmd
+from prompterator.commands.check import check_cmd
 from prompterator.commands.collect import collect_cmd
 from prompterator.commands.evals import evals_cmd
 from prompterator.commands.feedback import feedback_cmd
@@ -75,6 +76,7 @@ def main() -> None:
     \b
     Utilities:
     - annotate - Create .mb feedback files without writing boilerplate
+    - check    - Validate that a prompt file parses as YAML
     - collect  - Gather mb files with their source and prior files
     - status   - Show workflow state
     - guide    - Show where you are and what to do next
@@ -120,6 +122,7 @@ main.add_command(feedback_cmd)
 main.add_command(issues_cmd)
 main.add_command(evals_cmd)
 main.add_command(calibrate_cmd)
+main.add_command(check_cmd)
 main.add_command(improve_cmd)
 main.add_command(test_cmd)
 main.add_command(simplify_cmd)
