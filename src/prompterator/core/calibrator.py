@@ -89,6 +89,62 @@ def classify_labels_by_polarity(
     return negative, positive
 
 
+def _all_evidence_keys(issue_file: IssueFile) -> set[tuple[str, str]]:
+    """Every (source_basename, feedback) pair cited anywhere in the issue file."""
+    keys: set[tuple[str, str]] = set()
+    for issue in issue_file.issues:
+        for ev in issue.evidence:
+            keys.add((Path(ev.source).name, ev.feedback))
+    return keys
+
+
+def _filter_entry_for_issue(
+    entry_text: str,
+    mb_name: str,
+    src_name: str,
+    this_issue_keys: set[tuple[str, str]],
+    all_evidence_keys: set[tuple[str, str]],
+) -> str:
+    """Narrow a compound entry to the fragments that speak to this issue's axis.
+
+    Feedback entries are often compound ("A; B; C"). Handing the whole entry
+    to the critic confuses it — the critic sees fragments that belong to
+    *other* issues' axes (e.g. 'clothes distorted' while judging an
+    artifacts eval) and mistakenly fires FAIL on them.
+
+    We restrict the text the critic sees to:
+      - fragments cited as evidence for THIS issue (either polarity), and
+      - fragments not cited for any issue (uncited = about some latent axis;
+        pass them through, the critic can ignore irrelevant clean parts).
+
+    Fragments cited for OTHER issues are dropped — they belong to a
+    different axis and should not influence this eval's verdict.
+
+    Falls back to the full entry text when splitting yields a single part
+    or when the filter would return nothing.
+    """
+    parts = _split_feedback_entry(entry_text)
+    if parts == [entry_text]:
+        return entry_text
+
+    kept: list[str] = []
+    for part in parts:
+        key_mb = (mb_name, part)
+        key_src = (src_name, part)
+        if key_mb in this_issue_keys or key_src in this_issue_keys:
+            kept.append(part)
+        elif key_mb in all_evidence_keys or key_src in all_evidence_keys:
+            # Cited for a different issue — drop.
+            continue
+        else:
+            # Uncited fragment: include, critic can decide if relevant.
+            kept.append(part)
+
+    if not kept:
+        return entry_text
+    return "; ".join(kept)
+
+
 def _build_output_rubric_prompt(
     feedback_text: str,
     criteria: list[str],
@@ -325,6 +381,7 @@ def calibrate(
             reviewed.append((mb_name, mb_dir, entry, src_name))
 
     results: list[CalibrationResult] = []
+    all_evidence_keys = _all_evidence_keys(issue_file)
 
     for eval_spec in eval_file.evals:
         negative_evidence, positive_evidence = classify_labels_by_polarity(
@@ -336,6 +393,8 @@ def calibrate(
         # evidence can't produce a detection rate.
         if not negative_evidence:
             continue
+
+        this_issue_keys = negative_evidence | positive_evidence
 
         examples: list[CalibrationExample] = []
         for mb_name, mb_dir, entry, src_name in reviewed:
@@ -352,8 +411,15 @@ def calibrate(
                 entry.input_ref, feedback_dir or mb_dir,
             )
 
+            # Narrow the feedback to fragments relevant to this eval's axis,
+            # so the critic doesn't fire on unrelated fragments from the same
+            # compound entry (e.g. 'clothes distorted' when judging artifacts).
+            filtered_text = _filter_entry_for_issue(
+                entry.text, mb_name, src_name, this_issue_keys, all_evidence_keys,
+            )
+
             eval_passed = run_calibration_eval(
-                eval_spec, entry.text, llm_client,
+                eval_spec, filtered_text, llm_client,
                 input_content=input_content,
             )
             if progress:

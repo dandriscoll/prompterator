@@ -52,6 +52,40 @@ SCORE: 0.33"""
     assert abs(score - 1 / 3) < 0.01
 
 
+def test_parse_rubric_response_markdown_formatting():
+    """Parser tolerates markdown-formatted critic responses (headings, bullets, bold)."""
+    response = """### Evaluation
+
+#### CRITERION: Clear
+- **RESULT**: PASS
+- **REASON**: Very clear
+
+#### CRITERION: Precise
+- **RESULT**: PASS
+- **REASON**: Precise
+
+### Overall Evaluation
+- **OVERALL**: PASS
+- **SCORE**: 1.0"""
+    passed, score, details = _parse_rubric_response(response, ["Clear", "Precise"])
+    assert passed is True
+    assert score == 1.0
+
+
+def test_parse_rubric_response_markdown_mixed():
+    """Markdown-formatted mixed PASS/FAIL still counts correctly."""
+    response = """#### CRITERION: Clear
+**RESULT:** PASS
+
+#### CRITERION: Precise
+**RESULT:** FAIL
+
+**OVERALL:** FAIL"""
+    passed, score, _ = _parse_rubric_response(response, ["Clear", "Precise"])
+    assert passed is False
+    assert score == 0.5
+
+
 def test_build_rubric_prompt():
     """Rubric prompt includes criteria and prompt content."""
     prompt = _build_rubric_prompt("Test prompt", ["Criterion A", "Criterion B"])

@@ -83,8 +83,16 @@ def _parse_rubric_response(response: str, criteria: list[str]) -> tuple[bool, fl
     total_count = len(criteria)
     details = []
 
-    for line in lines:
+    # Strip markdown prefixes/emphasis so "- **RESULT**: PASS" or
+    # "#### CRITERION:" parses the same as "RESULT: PASS".
+    def _demark(line: str) -> str:
         line = line.strip()
+        line = re.sub(r'^[>#*\-\s]+', '', line)  # leading bullets, headings, quotes
+        line = line.replace('**', '').replace('__', '')  # bold
+        return line.strip()
+
+    for raw_line in lines:
+        line = _demark(raw_line)
         # Match "CRITERION N: PASS/FAIL" or "RESULT: PASS/FAIL" patterns
         criterion_match = re.match(r'^CRITERION\s*\d*\s*:\s*(PASS|FAIL)', line, re.IGNORECASE)
         result_match = re.match(r'^RESULT\s*\d*\s*:\s*(PASS|FAIL)', line, re.IGNORECASE)
@@ -92,10 +100,10 @@ def _parse_rubric_response(response: str, criteria: list[str]) -> tuple[bool, fl
         if match:
             if match.group(1).upper() == "PASS":
                 passed_count += 1
-        elif line.startswith("OVERALL:"):
+        elif line.upper().startswith("OVERALL:"):
             pass  # We calculate our own
-        elif re.match(r'^REASON\s*\d*\s*:', line):
-            details.append(re.split(r'^REASON\s*\d*\s*:\s*', line, 1)[-1].strip())
+        elif re.match(r'^REASON\s*\d*\s*:', line, re.IGNORECASE):
+            details.append(re.split(r'^REASON\s*\d*\s*:\s*', line, 1, flags=re.IGNORECASE)[-1].strip())
 
     if total_count == 0:
         score = 1.0

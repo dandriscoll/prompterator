@@ -364,6 +364,56 @@ def test_calibrate_all_missed():
     assert cal.false_negatives == 2
 
 
+def test_filter_entry_keeps_this_issue_and_uncited_parts():
+    """Fragment filter drops other-issue parts, keeps this-issue and uncited parts."""
+    from prompterator.core.calibrator import _filter_entry_for_issue
+
+    entry = ("clothes distorted (appear ripped); "
+             "no AI artifacts; "
+             "face generated correctly; "
+             "no body deformations")
+
+    # "clothes distorted..." is evidence for issue-clothing (this eval's issue),
+    # "no AI artifacts" is evidence for a different issue (artifacts),
+    # "face generated correctly" and "no body deformations" are uncited.
+    this_issue_keys = {("r1.mb", "clothes distorted (appear ripped)")}
+    all_evidence_keys = {
+        ("r1.mb", "clothes distorted (appear ripped)"),
+        ("r1.mb", "no AI artifacts"),
+    }
+    out = _filter_entry_for_issue(
+        entry, "r1.mb", "r1.mb", this_issue_keys, all_evidence_keys,
+    )
+    assert "clothes distorted (appear ripped)" in out
+    assert "face generated correctly" in out
+    assert "no body deformations" in out
+    assert "no AI artifacts" not in out
+
+
+def test_filter_entry_non_compound_passes_through():
+    """A single non-compound entry is returned as-is."""
+    from prompterator.core.calibrator import _filter_entry_for_issue
+
+    entry = "one short observation"
+    out = _filter_entry_for_issue(
+        entry, "r1.mb", "r1.mb", set(), set(),
+    )
+    assert out == entry
+
+
+def test_filter_entry_all_filtered_falls_back_to_full():
+    """If filtering would remove everything, return the full entry as safety fallback."""
+    from prompterator.core.calibrator import _filter_entry_for_issue
+
+    entry = "problem A; problem B"
+    # Both parts are cited for a different issue; this issue has no keys.
+    all_evidence_keys = {("r1.mb", "problem A"), ("r1.mb", "problem B")}
+    out = _filter_entry_for_issue(
+        entry, "r1.mb", "r1.mb", set(), all_evidence_keys,
+    )
+    assert out == entry
+
+
 def test_calibrate_ignores_positive_evidence_for_fail_matching():
     """Positive-polarity evidence records do not cause entries to be labeled FAIL."""
     # Evidence for the issue: one negative ("bad"), one positive ("clean").
