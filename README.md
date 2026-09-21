@@ -165,6 +165,16 @@ workflow:
 Each role can use a different LLM provider or settings. For example, you might use
 a larger model for the Author and a faster model for the Critic.
 
+Treat `prompterator.yaml` like a script you are about to run. Custom LLM runners,
+`critic.script` and `naming.executable` are programs that prompterator starts with
+your permissions, and a stack's `endpoint` receives your prompts and content.
+Prompterator prints a warning when the config names a program outside the config
+file's directory. An `endpoint` must be an `https://` URL; `http://` is accepted
+only for a server on localhost.
+
+A `.env` file in the current directory is loaded on startup. Variables that are
+already set in your environment take precedence over values in `.env`.
+
 ## File Naming Tool (ft)
 
 Prompterator includes a file naming tool (`ft`) that manages filenames according to

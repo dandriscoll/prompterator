@@ -86,7 +86,8 @@ def main() -> None:
     """
     _dotenv_path = _Path.cwd() / ".env"
     if _dotenv_path.is_file():
-        load_dotenv(_dotenv_path, override=True)
+        # Values already set in the environment take precedence over .env.
+        load_dotenv(_dotenv_path, override=False)
 
 
 # Apply --debug to every command that uses LLMs

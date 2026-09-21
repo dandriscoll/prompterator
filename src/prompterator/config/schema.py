@@ -1,9 +1,43 @@
 """Configuration schema for prompterator."""
 
+import ipaddress
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+BUILTIN_RUNNERS = ("anthropic", "openai", "azure-openai")
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def endpoint_problem(url: str) -> str | None:
+    """Return why an endpoint URL is not accepted, or None if it is.
+
+    Endpoints must be https:// URLs with a host. Plain http:// is accepted
+    only for a server on this machine (localhost or a loopback address).
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return f"endpoint is not a valid URL: {url!r}"
+    if parts.scheme not in ("https", "http") or not host:
+        return f"endpoint must be an https:// URL; got {url!r}"
+    if parts.scheme == "http" and not _is_loopback_host(host):
+        return (
+            f"endpoint must use https:// (http:// is only accepted for "
+            f"localhost); got {url!r}"
+        )
+    return None
 
 
 class DirectoriesConfig(BaseModel):
@@ -30,7 +64,10 @@ class StackConfig(BaseModel):
 
     runner: str = Field(
         default="anthropic",
-        description="LLM runner: 'anthropic', 'openai', 'azure-openai', or path to custom script",
+        description=(
+            "LLM runner: 'anthropic', 'openai', 'azure-openai', or path to custom "
+            "script. A custom script runs with your permissions."
+        ),
     )
     model: str | None = Field(
         default=None,
@@ -38,12 +75,25 @@ class StackConfig(BaseModel):
     )
     endpoint: str | None = Field(
         default=None,
-        description="API endpoint URL (overrides environment variable)",
+        description=(
+            "API endpoint URL (overrides environment variable). Must be https://, "
+            "or http:// for a server on localhost"
+        ),
     )
     api_version: str | None = Field(
         default=None,
         description="API version (for Azure OpenAI)",
     )
+
+    @field_validator("endpoint")
+    @classmethod
+    def _validate_endpoint(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        problem = endpoint_problem(value)
+        if problem:
+            raise ValueError(problem)
+        return value
 
 
 class LLMRoleConfig(BaseModel):
@@ -113,7 +163,10 @@ class CriticConfig(LLMRoleConfig):
     )
     script: str | None = Field(
         default=None,
-        description="Path to critic script executable (required when mode='script')",
+        description=(
+            "Path to critic script executable (required when mode='script'). "
+            "The script runs with your permissions."
+        ),
     )
     script_timeout: int = Field(
         default=60,
@@ -169,7 +222,10 @@ class NamingConfig(BaseModel):
 
     executable: str = Field(
         default="naming",
-        description="Path to naming executable or 'naming' for default",
+        description=(
+            "Path to naming executable or 'naming' for default. A custom "
+            "executable runs with your permissions."
+        ),
     )
     timeout: int = Field(default=30, gt=0, description="Command timeout in seconds")
 

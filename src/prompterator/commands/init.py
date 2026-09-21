@@ -13,6 +13,7 @@ from prompterator.config.schema import (
     CriticConfig,
     EditorConfig,
     StackConfig,
+    endpoint_problem,
 )
 
 
@@ -78,6 +79,18 @@ def _parse_azure_url(url: str) -> dict[str, str | None]:
     return {"endpoint": base, "model": model, "api_version": api_version}
 
 
+def _prompt_endpoint_url() -> str:
+    """Prompt for an endpoint URL until it is blank or accepted."""
+    while True:
+        endpoint = click.prompt("Endpoint URL", default="", show_default=False)
+        if not endpoint:
+            return endpoint
+        problem = endpoint_problem(endpoint)
+        if problem is None:
+            return endpoint
+        click.echo(f"  {problem}")
+
+
 def _prompt_for_endpoint(runner: str) -> tuple[str | None, str | None, str | None]:
     """Prompt for endpoint configuration.
 
@@ -89,7 +102,7 @@ def _prompt_for_endpoint(runner: str) -> tuple[str | None, str | None, str | Non
         click.echo("Azure OpenAI requires an endpoint URL.")
         click.echo("You may paste a full chat completions URL or just the base endpoint.")
         click.echo("Leave blank to use AZURE_OPENAI_ENDPOINT environment variable.")
-        endpoint = click.prompt("Endpoint URL", default="", show_default=False)
+        endpoint = _prompt_endpoint_url()
         if not endpoint:
             return None, None, None
         parsed = _parse_azure_url(endpoint)
@@ -97,7 +110,7 @@ def _prompt_for_endpoint(runner: str) -> tuple[str | None, str | None, str | Non
     elif runner in ("openai", "anthropic"):
         click.echo()
         click.echo(f"Custom endpoint (leave blank for default {runner.title()} API):")
-        endpoint = click.prompt("Endpoint URL", default="", show_default=False)
+        endpoint = _prompt_endpoint_url()
         return (endpoint if endpoint else None), None, None
     return None, None, None
 
