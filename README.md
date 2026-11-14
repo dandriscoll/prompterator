@@ -122,7 +122,10 @@ creating a new variation (e.g., `001a.prompt.txt`). This allows you to:
 
 ## Configuration
 
-Configuration is stored in `prompterator.yaml`:
+Configuration is stored in `prompterator.yaml`. Prompterator looks for it in the
+current directory and then in each parent directory, stopping at the root of the
+enclosing git repository or at your home directory, whichever comes first. Outside
+a git repository and your home directory, only the current directory is checked.
 
 ```yaml
 version: "1.0"

@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from pydantic import ValidationError
 
 from prompterator.cli import main
-from prompterator.config.loader import load_config
+from prompterator.config.loader import find_config_file, load_config
 from prompterator.config.schema import StackConfig
 
 
@@ -161,3 +161,68 @@ def test_init_endpoint_prompt_asks_again_for_unaccepted_url(runner):
 
     assert endpoint == "https://api.example.com/v1"
     assert b"https://" in streams[0].getvalue()
+
+
+# ---------------------------------------------------------------------------
+# config file discovery
+# ---------------------------------------------------------------------------
+
+def _place_config(directory: Path) -> Path:
+    path = directory / "prompterator.yaml"
+    path.write_text('version: "1.0"\n')
+    return path
+
+
+@pytest.fixture
+def fake_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
+def test_config_above_git_root_is_not_found(tmp_path, fake_home):
+    repo = fake_home / "outer" / "repo"
+    work = repo / "sub" / "dir"
+    work.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    _place_config(fake_home / "outer")
+
+    assert find_config_file(work) is None
+
+
+def test_config_at_git_root_is_found(tmp_path, fake_home):
+    repo = fake_home / "repo"
+    work = repo / "sub" / "dir"
+    work.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    expected = _place_config(repo)
+
+    assert find_config_file(work) == expected.resolve()
+
+
+def test_config_in_start_directory_is_found(tmp_path, fake_home):
+    work = fake_home / "project"
+    work.mkdir()
+    expected = _place_config(work)
+
+    assert find_config_file(work) == expected.resolve()
+
+
+def test_search_stops_at_home_without_git_root(tmp_path, fake_home):
+    work = fake_home / "a" / "b"
+    work.mkdir(parents=True)
+    _place_config(tmp_path)  # parent of the home directory
+
+    assert find_config_file(work) is None
+
+    expected = _place_config(fake_home)
+    assert find_config_file(work) == expected.resolve()
+
+
+def test_outside_home_and_git_only_start_directory_is_checked(tmp_path, fake_home):
+    work = tmp_path / "elsewhere" / "dir"
+    work.mkdir(parents=True)
+    _place_config(tmp_path / "elsewhere")
+
+    assert find_config_file(work) is None

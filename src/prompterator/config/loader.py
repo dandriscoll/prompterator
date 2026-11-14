@@ -11,22 +11,48 @@ from prompterator.config.schema import BUILTIN_RUNNERS, Config
 CONFIG_FILENAME = "prompterator.yaml"
 
 
+def _search_boundary(start: Path) -> Path | None:
+    """Return the top directory of the config search, or None.
+
+    The search stops at the nearest directory holding a ``.git`` entry (the
+    repository root) or at the home directory, whichever is reached first.
+    """
+    try:
+        home = Path.home().resolve()
+    except RuntimeError:
+        home = None
+
+    current = start
+    while True:
+        if (current / ".git").exists() or current == home:
+            return current
+        parent = current.parent
+        if parent == current:  # Reached filesystem root
+            return None
+        current = parent
+
+
 def find_config_file(start_dir: Path | None = None) -> Path | None:
-    """Find prompterator.yaml by searching up from start_dir."""
+    """Find prompterator.yaml by searching up from start_dir.
+
+    The search goes no higher than the enclosing git repository root or the
+    home directory, whichever comes first. Outside both, only start_dir
+    itself is checked.
+    """
     if start_dir is None:
         start_dir = Path.cwd()
 
     current = start_dir.resolve()
+    boundary = _search_boundary(current)
 
     while True:
         config_path = current / CONFIG_FILENAME
         if config_path.exists():
             return config_path
 
-        parent = current.parent
-        if parent == current:  # Reached filesystem root
+        if boundary is None or current == boundary:
             return None
-        current = parent
+        current = current.parent
 
 
 def load_config(config_path: Path | None = None) -> Config:
